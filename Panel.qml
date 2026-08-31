@@ -111,6 +111,14 @@ Panel {
   property string signInError: ""
 
   readonly property bool configured: cache.configured === true
+  readonly property bool signedIn: cache.signedIn === true
+
+  // Someone who only ever subscribed to a feed is configured but not signed
+  // in. Without this the form would be gone for good the moment the first
+  // feed landed, and there would be no way back to it.
+  property bool showSignIn: false
+  readonly property bool signInVisible: (!root.configured || root.showSignIn)
+    && root.missingPackages.length === 0
   readonly property var missingPackages: cache.missing instanceof Array ? cache.missing : []
 
   // Which calendar's swatches are open, and whether the URL field is up.
@@ -201,8 +209,7 @@ Panel {
       if (root.opened) setCenterHoverRevealSuppressed(true)
       // A panel that opens by asking for credentials should be ready to take
       // them, rather than making the first act a click into a field.
-      if (root.opened && !root.configured && root.missingPackages.length === 0)
-        appleIdField.forceActiveFocus()
+      if (root.opened && root.signInVisible) appleIdField.forceActiveFocus()
     })
   }
 
@@ -584,6 +591,7 @@ Panel {
       root.signingIn = false
       if (exitCode === 0) {
         root.signInError = ""
+        root.showSignIn = false
         appleIdField.text = ""
         passwordField.text = ""
         Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
@@ -662,7 +670,7 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       blocked: root.editingLife || root.addingSubscription
-        || root.calendarEditing !== "" || !root.configured
+        || root.calendarEditing !== "" || root.signInVisible
       onMoveRequested: function(dx, dy) {
         if (dx !== 0) root.moveMonth(dx)
         if (dy !== 0) root.moveYear(dy)
@@ -1469,7 +1477,7 @@ Panel {
               //      log in" should be the whole of the setup.
               Column {
                 width: parent.width
-                visible: !root.configured && root.missingPackages.length === 0
+                visible: root.signInVisible
                 height: visible ? implicitHeight : 0
                 spacing: Style.space(5)
 
@@ -1567,7 +1575,7 @@ Panel {
               }
 
               Text {
-                visible: root.configured && root.missingPackages.length === 0
+                visible: !root.signInVisible && root.missingPackages.length === 0
                   && root.selectedEvents.length === 0
                 height: visible ? implicitHeight : 0
                 width: parent.width
@@ -1671,7 +1679,12 @@ Panel {
                   Text {
                     id: addLabel
                     anchors.verticalCenter: parent.verticalCenter
-                    text: root.addingSubscription ? "×" : "+"
+                    // With calendars beside it the glyph is enough; with
+                    // none it would be a lone mark on an empty row, so it
+                    // says what it does instead.
+                    text: root.addingSubscription
+                      ? "×"
+                      : (root.calendars.length === 0 ? "+  Add a calendar" : "+")
                     color: addMouse.containsMouse || root.addingSubscription
                       ? Style.hoverStateColor(root.contentForeground, Color.accent)
                       : Qt.darker(root.contentForeground, 1.9)
@@ -1700,7 +1713,43 @@ Panel {
                 }
 
                 Item {
-                  visible: root.cache.signedIn === true
+                  visible: root.configured && !root.signedIn
+                  width: visible ? signInChip.width : 0
+                  height: root.calendarRowHeight
+
+                  Text {
+                    id: signInChip
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.showSignIn ? "Cancel" : "Sign in"
+                    color: signInChipMouse.containsMouse
+                      ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                      : Qt.darker(root.contentForeground, 2.2)
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+
+                  MouseArea {
+                    id: signInChipMouse
+                    anchors.fill: parent
+                    anchors.margins: -Style.space(4)
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                      root.showSignIn = !root.showSignIn
+                      root.signInError = ""
+                      if (root.showSignIn) Qt.callLater(function() { appleIdField.forceActiveFocus() })
+                    }
+                  }
+
+                  PanelToolTip {
+                    visible: signInChipMouse.containsMouse
+                    text: "Connect an iCloud or CalDAV account"
+                    fontFamily: root.contentFontFamily
+                  }
+                }
+
+                Item {
+                  visible: root.signedIn
                   width: visible ? signOutLabel.width : 0
                   height: root.calendarRowHeight
 
