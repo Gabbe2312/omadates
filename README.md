@@ -94,7 +94,7 @@ Calendars**, or on a Mac in Calendar under **File → Get Info**.
 | `+ New event` | Add one to the day you are looking at |
 | `Delete` in an open event | Remove it; press twice to confirm |
 | Click a calendar | Hide or show it |
-| Right-click a calendar | Rename it, or pick its colour |
+| Right-click a calendar | Rename it, or set the colour every device sees |
 | Right-click the year bar | Put the year meter away; the hairline it leaves behind brings it back |
 | `+` | Subscribe to a feed |
 | Scroll / `[` `]` | Previous and next month |
@@ -112,9 +112,14 @@ Weeks start wherever your system locale says they do until you say otherwise,
 which for an `en_US` locale means Sunday even in a country that does not.
 Clicking the `W` settles it for good.
 
-Renaming and recolouring are display choices, stored next to the widget in
-`shell.json`. A sync never overwrites them, and the calendar's original name
-stays its identity underneath.
+Recolouring a calendar your account owns sets its colour on the server, so it
+changes on your phone and everywhere else too. A subscribed feed cannot take
+one, so there the colour stays a local note with a way back to whatever the
+feed publishes.
+
+Renaming is always local, stored next to the widget in `shell.json`. A sync
+never overwrites it, and the calendar's original name stays its identity
+underneath.
 
 Everything the stock Omarchy clock does is still there: the label formats on
 right-click, the year bar, the timezone picker, memento mori.

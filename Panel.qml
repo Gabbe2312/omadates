@@ -383,6 +383,25 @@ Panel {
   function setCalendarColor(name, hex) {
     var key = String(name || "")
     if (key === "") return
+
+    // A calendar the account owns keeps its colour on the server, where every
+    // device reads it. Setting it here sets it on the phone, so a local
+    // override would only be something to disagree with later.
+    if (root.writableCalendars.indexOf(key) !== -1 && String(hex || "") !== "") {
+      root.colourError = ""
+      root.colouring = true
+      root.pendingColour = JSON.stringify({ calendar: key, color: String(hex) })
+      colourProcess.stdinEnabled = true
+      colourProcess.command = root.syncCommand.concat(["colour"])
+      colourProcess.running = true
+      if (root.calendarColors[key] !== undefined) {
+        var without = {}
+        for (var drop in root.calendarColors) if (drop !== key) without[drop] = root.calendarColors[drop]
+        persistSettings({ calendarColors: without })
+      }
+      return
+    }
+
     var next = {}
     for (var existing in root.calendarColors) next[existing] = root.calendarColors[existing]
     // An empty colour clears the override rather than storing a blank, so
@@ -541,11 +560,13 @@ Panel {
     id: writeWatchdog
     interval: 40000
     repeat: false
-    running: root.creating || root.deleting
+    running: root.creating || root.deleting || root.colouring
     onTriggered: {
       if (root.creating) root.composeError = "That took too long. Nothing was saved as far as this knows"
+      if (root.colouring) root.colourError = "That took too long"
       root.creating = false
       root.deleting = false
+      root.colouring = false
       calendarCache.reload()
     }
   }
@@ -555,6 +576,14 @@ Panel {
   // and nothing stays armed behind your back.
   property string deleteArmed: ""
   property bool deleting: false
+
+  // Writing a colour to the server, which is where the phone reads it.
+  property string pendingColour: ""
+  property bool colouring: false
+  property string colourError: ""
+
+  readonly property bool editingOwnCalendar:
+    root.writableCalendars.indexOf(root.calendarEditing) !== -1
 
   function canDelete(event) {
     if (!event) return false
@@ -801,6 +830,21 @@ Panel {
 
   Process {
     id: mapProcess
+  }
+
+  Process {
+    id: colourProcess
+    stdinEnabled: true
+    onStarted: {
+      write(root.pendingColour)
+      stdinEnabled = false
+    }
+    onExited: function(exitCode) {
+      root.pendingColour = ""
+      root.colouring = false
+      root.colourError = exitCode === 0 ? "" : "Could not set it on the server"
+      calendarCache.reload()
+    }
   }
 
   Process {
@@ -2587,11 +2631,13 @@ Panel {
                   }
                 }
 
-                // Back to whatever iCloud or the feed said, for undoing a
-                // choice without having to remember the original.
+                // Only where a local override is the whole story. On a
+                // calendar the account owns the colour lives on the server,
+                // so there is no separate original to go back to.
                 Rectangle {
+                  visible: !root.editingOwnCalendar
                   anchors.verticalCenter: parent.verticalCenter
-                  width: Style.space(11)
+                  width: visible ? Style.space(11) : 0
                   height: width
                   radius: width / 2
                   color: "transparent"
@@ -2610,12 +2656,28 @@ Panel {
 
                   PanelToolTip {
                     visible: resetMouse.containsMouse
-                    text: "Use the calendar's own colour"
+                    text: "Use the colour the feed publishes"
                     fontFamily: root.contentFontFamily
                   }
                 }
 
                 Item { width: Style.space(4); height: 1 }
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: root.colouring || root.colourError !== "" || root.editingOwnCalendar
+                  text: root.colouring
+                    ? "Saving…"
+                    : (root.colourError !== "" ? root.colourError : "Syncs to your other devices")
+                  color: root.colourError !== ""
+                    ? Qt.darker(root.contentForeground, 1.3)
+                    : Qt.darker(root.contentForeground, 2.1)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                }
+
+                Item { width: Style.space(10); height: 1 }
 
                 // Done, for anyone who does not think to press Enter.
                 Text {

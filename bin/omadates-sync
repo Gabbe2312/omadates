@@ -12,6 +12,7 @@ Subcommands (the panel drives all of these; they also work by hand):
     logout                Forget the account and its password.
     create                Write one event, read as JSON on stdin.
     delete                Remove one event, read as JSON on stdin.
+    colour                Set a calendar's colour on the server, JSON on stdin.
     map <location>        Open a location in the system's map handler.
     subscribe <url>       Add a webcal:// or https://….ics feed, then sync.
     unsubscribe <url>     Drop a feed, then sync.
@@ -664,6 +665,65 @@ def cmd_poll():
     return cmd_sync()
 
 
+def cmd_colour(args):
+    """Set a calendar's colour on the server, where every device reads it.
+
+    Apple stores this as #RRGGBBAA on the collection itself, so the change
+    reaches the phone the same way a new event does. Only calendars the
+    account owns can take it: a subscribed feed is somebody else's file, and
+    its colour stays a local note.
+    """
+    try:
+        payload = json.loads(sys.stdin.read() or "{}")
+    except Exception as exc:
+        print(f"omadates-sync: unreadable payload: {exc}", file=sys.stderr)
+        return 2
+
+    target = str(payload.get("calendar") or "").strip()
+    colour = normalise_hex(payload.get("color"))
+    if not target:
+        return fail("no calendar given")
+    if not colour:
+        return fail("that is not a colour")
+
+    config = load_config()
+    username = str(config.get("username") or "").strip()
+    if not username:
+        return fail("not signed in")
+
+    import caldav
+    from caldav.elements import ical
+    try:
+        password = keyring_lookup(username)
+        client = caldav.DAVClient(url=str(config["url"]), username=username,
+                                  password=password, timeout=NETWORK_TIMEOUT)
+        calendars = client.principal().calendars()
+    except Exception as exc:
+        return fail(friendly_error(exc))
+
+    for candidate in calendars:
+        if calendar_name(candidate, "") != target:
+            continue
+        try:
+            # Alpha appended because that is the shape Apple writes and reads.
+            candidate.set_properties([ical.CalendarColor(colour + "FF")])
+        except Exception as exc:
+            return fail(friendly_error(exc))
+        break
+    else:
+        return fail(f"no calendar named '{target}'")
+
+    def recolour(events):
+        for event in events:
+            if event.get("calendar") == target:
+                event["color"] = colour
+        return events
+
+    edit_cache(recolour)
+    print(f"omadates-sync: {target} is now {colour}")
+    return 0
+
+
 def cmd_map(args):
     """Open a location in whatever this system uses for maps.
 
@@ -1017,6 +1077,8 @@ def main(argv):
         return cmd_create(rest)
     if command == "delete":
         return cmd_delete(rest)
+    if command == "colour":
+        return cmd_colour(rest)
     if command == "login":
         return cmd_login(rest)
     if command == "logout":
