@@ -599,8 +599,86 @@ def cmd_map(args):
     # Detached, so closing the panel or the shell never takes the map with it.
     subprocess.Popen(launch + [target], start_new_session=True,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    focus_browser()
     print("omadates-sync: opened " + target)
     return 0
+
+
+def browser_classes():
+    """What the window of the machine's default browser is likely called.
+
+    Taken from the handler's own desktop file: StartupWMClass when it names
+    one, and the file's own name otherwise, which is what most browsers end
+    up using anyway.
+    """
+    import shutil
+    if not shutil.which("xdg-mime"):
+        return []
+    try:
+        desktop = subprocess.run(["xdg-mime", "query", "default", "x-scheme-handler/https"],
+                                 capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception:
+        return []
+    if not desktop:
+        return []
+
+    names = [desktop[:-len(".desktop")] if desktop.endswith(".desktop") else desktop]
+    roots = [Path("/usr/share/applications"), Path("/usr/local/share/applications"),
+             Path.home() / ".local/share/applications"]
+    for root in roots:
+        path = root / desktop
+        if not path.exists():
+            continue
+        try:
+            for line in path.read_text().splitlines():
+                if line.startswith("StartupWMClass="):
+                    names.insert(0, line.split("=", 1)[1].strip())
+                    break
+        except Exception:
+            pass
+        break
+    # Some packages ship the template variable unsubstituted, so a value has
+    # to look like a window class before it is trusted as one.
+    return [n for n in names if n and "@" not in n and " " not in n]
+
+
+def focus_browser():
+    """Bring the browser to you, rather than leaving the tab on another desk.
+
+    Opening a map in an existing browser session adds a tab to a window that
+    may be two workspaces away, so from where you are sitting nothing happens
+    at all. Chromium sends no activation request on this path, so the focus
+    has to be asked for.
+    """
+    import shutil
+    import time
+    if not shutil.which("hyprctl"):
+        return
+    wanted = [n.lower() for n in browser_classes()]
+    if not wanted:
+        return
+
+    # A running browser is focused at once; one starting cold needs a moment
+    # to put a window up.
+    for _ in range(12):
+        try:
+            clients = json.loads(subprocess.run(["hyprctl", "clients", "-j"],
+                                                capture_output=True, text=True,
+                                                timeout=5).stdout or "[]")
+        except Exception:
+            return
+        for client in clients:
+            name = str(client.get("class") or "").lower()
+            if not name:
+                continue
+            if any(w in name or name in w for w in wanted):
+                address = str(client.get("address") or "")
+                if address:
+                    subprocess.run(["hyprctl", "dispatch",
+                                    'hl.dsp.focus({ window = "address:%s" })' % address],
+                                   capture_output=True, timeout=5)
+                return
+        time.sleep(0.25)
 
 
 def cmd_check():

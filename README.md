@@ -171,6 +171,10 @@ The map opens through your registered `geo:` handler, so it lands in whichever
 map you have chosen; Omarchy ships handlers for Google Maps, OpenStreetMap and
 Wheelmap. A system with none falls back to a web search.
 
+It reuses the browser you already have open rather than starting another, and
+brings that window to you if it is sitting on a different workspace. A tab
+opening two desks away is the same as nothing happening.
+
 ## Removing it
 
 ```bash
