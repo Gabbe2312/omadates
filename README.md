@@ -42,19 +42,25 @@ that still resolves alone, and never claims a blank one, since blank means
 Optional. A subscribed feed works on its own, so if all you want is a
 timetable or a holiday calendar, skip to the next section.
 
-Open the clock in the bar and fill in the two fields.
+You need an **app-specific password** — not your normal Apple password. Apple
+offers no browser sign-in for calendar access, and CalDAV has nowhere to type
+a two-factor code, so this is the supported way in. It is revocable on its
+own and useless anywhere else.
+
+1. Open **account.apple.com** and sign in
+2. **Sign-In and Security → App-Specific Passwords**
+3. Add one, name it *Omarchy*, and copy the code
+
+Then open the clock in the bar and enter your Apple ID and that code. The
+panel spells these steps out too, and clicking them opens the page.
 
 ![Signing in](docs/sign-in.png)
 
-You need an **app-specific password**, not your normal Apple password. Apple
-offers no browser sign-in for calendar access, and CalDAV has nowhere to type
-a two-factor code, so this is the supported way in. Create one at
-**account.apple.com → Sign-In and Security → App-Specific Passwords**. You can
-revoke it there at any time without touching anything else.
+The password goes straight to your login keyring. Revoke it at Apple any time
+without touching anything else.
 
-The password goes into your login keyring via `secret-tool`. It is never
-written to a config file, never passed as a command-line argument, and reaches
-the sync helper on stdin.
+It never lands in a config file, is never passed as a command-line argument,
+and reaches the sync helper on stdin.
 
 ## Subscribed calendars
 

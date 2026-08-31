@@ -606,6 +606,10 @@ Panel {
   }
 
   Process {
+    id: appleLinkProcess
+  }
+
+  Process {
     id: logoutProcess
     onExited: calendarCache.reload()
   }
@@ -1481,6 +1485,100 @@ Panel {
                 height: visible ? implicitHeight : 0
                 spacing: Style.space(5)
 
+                // Above the fields, not below them: you need the password in
+                // hand before there is anything to type, so instructions
+                // underneath arrive a step too late.
+                Text {
+                  width: parent.width
+                  text: "CONNECT ICLOUD"
+                  color: Qt.darker(root.contentForeground, 1.5)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  font.letterSpacing: 1
+                }
+
+                Text {
+                  width: parent.width
+                  // The reason, because "not your normal password" reads as
+                  // an arbitrary rule without it.
+                  text: "Apple has no browser sign-in for calendars, and CalDAV has "
+                    + "nowhere to type a two-factor code. So it needs a password made "
+                    + "for this one purpose — revocable on its own, and useless anywhere else."
+                  color: Qt.darker(root.contentForeground, 1.75)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  wrapMode: Text.WordWrap
+                }
+
+                Item {
+                  width: parent.width
+                  height: appleLinkRow.implicitHeight + Style.space(12)
+
+                  Rectangle {
+                    anchors.fill: parent
+                    radius: Style.cornerRadius
+                    color: appleLinkMouse.containsMouse
+                      ? Style.hoverFillFor(root.contentForeground, Color.accent)
+                      : Style.normalFillFor(root.contentForeground, Color.accent)
+                  }
+
+                  Column {
+                    id: appleLinkRow
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.leftMargin: Style.space(11)
+                    anchors.rightMargin: Style.space(11)
+                    spacing: Style.space(2)
+
+                    Text {
+                      width: parent.width
+                      text: "1.  Open account.apple.com and sign in"
+                      color: root.contentForeground
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.caption
+                      wrapMode: Text.WordWrap
+                    }
+
+                    Text {
+                      width: parent.width
+                      text: "2.  Sign-In and Security → App-Specific Passwords"
+                      color: root.contentForeground
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.caption
+                      wrapMode: Text.WordWrap
+                    }
+
+                    Text {
+                      width: parent.width
+                      text: "3.  Add one, name it Omarchy, copy the code below"
+                      color: root.contentForeground
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.caption
+                      wrapMode: Text.WordWrap
+                    }
+                  }
+
+                  // The whole block opens the page: the first step is a trip
+                  // to a browser either way, so it may as well be one click.
+                  MouseArea {
+                    id: appleLinkMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                      appleLinkProcess.command = ["xdg-open", "https://account.apple.com"]
+                      appleLinkProcess.running = true
+                    }
+                  }
+
+                  PanelToolTip {
+                    visible: appleLinkMouse.containsMouse
+                    text: "Open account.apple.com"
+                    fontFamily: root.contentFontFamily
+                  }
+                }
+
                 TextField {
                   id: appleIdField
                   width: parent.width
@@ -1550,15 +1648,6 @@ Panel {
                       onClicked: root.signIn()
                     }
                   }
-                }
-
-                Text {
-                  width: parent.width
-                  text: "Create one at account.apple.com → Sign-In and Security → App-Specific Passwords"
-                  color: Qt.darker(root.contentForeground, 2.1)
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.caption
-                  wrapMode: Text.WordWrap
                 }
 
                 // An account is not actually required — a subscribed feed
