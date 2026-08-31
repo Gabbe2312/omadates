@@ -343,12 +343,38 @@ def cmd_check():
     return 0
 
 
+# The panel prints whatever comes back from here, in a space a few words wide.
+# Library exceptions are neither: a urllib3 connection error runs to three
+# lines of object addresses and nested causes, and saying that to someone whose
+# wifi dropped tells them nothing they can act on.
+ERROR_SIGNS = [
+    (("Name or service not known", "NameResolutionError", "Temporary failure in name resolution",
+      "Failed to resolve", "getaddrinfo"), "no connection"),
+    (("Connection refused", "ConnectionError", "Max retries exceeded",
+      "Network is unreachable", "Connection aborted"), "no connection"),
+    (("timed out", "Timeout", "ReadTimeout", "ConnectTimeout"), "the server did not answer in time"),
+    (("SSLError", "CERTIFICATE_VERIFY_FAILED", "SSLCertVerification"), "the server's certificate could not be verified"),
+    (("401", "Unauthorized", "Forbidden"),
+     "the server rejected the sign-in. Check the Apple ID, and note that "
+     "this needs an app-specific password, not your usual one"),
+    (("404", "Not Found"), "the server had nothing at that address"),
+    (("5033", "500", "502", "503", "Server Error"), "the server is having trouble. Try again shortly"),
+]
+
+# Long enough for a real sentence, short enough that an unrecognised error
+# cannot push the calendar off the panel.
+ERROR_LIMIT = 120
+
+
 def friendly_error(exc):
-    detail = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
-    if any(k in detail for k in ("401", "Unauthorized", "Forbidden")):
-        return ("the server rejected the sign-in. Check the Apple ID, and note that "
-                "this needs an app-specific password, not your usual one")
-    return detail
+    detail = str(exc).strip()
+    for signs, message in ERROR_SIGNS:
+        if any(sign in detail for sign in signs):
+            return message
+    # Nothing recognised. Keep the first line so the cause is not lost, but
+    # cut it to something a panel can hold.
+    first = detail.splitlines()[0] if detail else exc.__class__.__name__
+    return first if len(first) <= ERROR_LIMIT else first[:ERROR_LIMIT].rstrip() + "…"
 
 
 def verify_credentials(url, username, password):
@@ -481,7 +507,7 @@ def cmd_sync():
             try:
                 events.extend(collect_caldav(calendar, start, end, tz, name, calendar_color(calendar)))
             except Exception as exc:
-                problems.append(f"{name}: {str(exc).splitlines()[0]}")
+                problems.append(f"{name}: {friendly_error(exc)}")
 
     # A bad feed fails on its own rather than taking the whole sync down.
     for entry in subscriptions:
@@ -492,7 +518,7 @@ def cmd_sync():
             if name:
                 seen.append(name)
         except Exception as exc:
-            problems.append(f"{label}: {str(exc).splitlines()[0]}")
+            problems.append(f"{label}: {friendly_error(exc)}")
 
     if problems and not events:
         return fail("; ".join(problems))

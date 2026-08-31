@@ -61,6 +61,16 @@ Panel {
   readonly property int lifeDonePercent: Model.lifeProgressPercent(age, lifeExpectancy)
   property bool editingLife: false
 
+  // The year meter is the rule under the hero as well as a reading, so
+  // hiding it cannot simply delete the row: the hero would sit straight on
+  // the grid. Off, the space keeps a plain hairline, which is both the
+  // divider the layout needs and the way back.
+  readonly property bool showYearBar: setting("showYearProgress", true) !== false
+
+  function toggleYearBar() {
+    persistSettings({ showYearProgress: !root.showYearBar })
+  }
+
   // Unset falls through to the locale's own first day, so a fresh install
   // starts out matching the rest of the desktop rather than a hardcoded
   // convention. Clicking the grid's "W" heading writes the choice back to
@@ -164,9 +174,14 @@ Panel {
 
   // Only the ordinary outcomes. Never signed in and missing packages each
   // get their own block below, because each has a different next step.
-  readonly property string statusMessage: root.cacheFailed
+  // An empty day says so plainly. Whether the last sync worked is a separate
+  // question with a separate line, because the two are independent: a failed
+  // sync leaves the last good calendar on screen, and a day with nothing on
+  // it is not a fault.
+  readonly property string statusMessage: "Nothing scheduled"
+  readonly property string syncTrouble: root.cacheFailed
     ? (root.cache.error !== "" ? root.cache.error : "Calendar sync failed")
-    : "Nothing scheduled"
+    : ""
 
 
   // Guarded so the widget renders before the bar is injected (the bar-widget
@@ -788,10 +803,38 @@ Panel {
           //      over days in the year says the same thing louder.
           Item {
             width: parent.width
-            height: yearBlock.y + yearBlock.height
+            height: root.showYearBar ? yearBlock.y + yearBlock.height : Style.space(24)
+
+            // The hairline that stands in for the meter. Clicking either one
+            // swaps them, so the control is in the same place both ways.
+            Rectangle {
+              visible: !root.showYearBar
+              y: Style.space(12)
+              anchors.horizontalCenter: parent.horizontalCenter
+              width: gridColumn.width
+              height: Style.spacing.hairline
+              color: root.contentForeground
+              opacity: yearRuleMouse.containsMouse ? 0.35 : 0.12
+
+              MouseArea {
+                id: yearRuleMouse
+                anchors.fill: parent
+                anchors.margins: -Style.space(7)
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.toggleYearBar()
+              }
+
+              PanelToolTip {
+                visible: yearRuleMouse.containsMouse
+                text: "Show year progress"
+                fontFamily: root.contentFontFamily
+              }
+            }
 
             Item {
               id: yearBlock
+              visible: root.showYearBar
               y: Style.space(6)
               anchors.horizontalCenter: parent.horizontalCenter
               width: gridColumn.width
@@ -800,6 +843,14 @@ Panel {
               TapHandler {
                 enabled: !root.editingLife
                 onDoubleTapped: root.startEditingLife()
+              }
+
+              // Right-click puts the meter away. Left-click is left alone:
+              // the year rail already answers to a double tap for the life
+              // bar, and a single click would fight it.
+              TapHandler {
+                acceptedButtons: Qt.RightButton
+                onSingleTapped: root.toggleYearBar()
               }
 
               Row {
@@ -1678,194 +1729,201 @@ Panel {
                   && root.selectedEvents.length === 0
                 width: parent.width
                 text: root.statusMessage
-                color: Qt.darker(root.contentForeground, root.cacheFailed ? 1.3 : 1.9)
+                color: Qt.darker(root.contentForeground, 1.9)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+              }
+
+              // Its own line, shown whether or not the day has anything on
+              // it: what is on screen is the last calendar that arrived, and
+              // saying nothing would let it quietly go stale.
+              Text {
+                visible: root.syncTrouble !== "" && !root.signInVisible
+                  && root.missingPackages.length === 0
+                width: parent.width
+                text: "Last sync: " + root.syncTrouble
+                color: Qt.darker(root.contentForeground, 1.5)
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
                 wrapMode: Text.WordWrap
               }
 
               // ---- Calendars, doubling as the legend and the switches.
               //      A single calendar has nothing to toggle between, so the
               //      row only earns its space once there are two.
-              Flow {
+              Item {
                 width: parent.width
-                // Always present, even with a single calendar or none at
-                // all: subscribing does not depend on the iCloud account, so
-                // the "+" has to be reachable before there is anything to
-                // switch between.
-                height: implicitHeight
-                spacing: Style.space(12)
-                topPadding: Style.space(2)
+                height: calendarFlow.implicitHeight
 
-                Repeater {
-                  model: root.calendars
+                Flow {
+                  id: calendarFlow
+                  anchors.left: parent.left
+                  anchors.right: accountAction.left
+                  anchors.rightMargin: Style.space(12)
+                  width: parent.width
+                  // Always present, even with a single calendar or none at
+                  // all: subscribing does not depend on the iCloud account, so
+                  // the "+" has to be reachable before there is anything to
+                  // switch between.
+                  height: implicitHeight
+                  spacing: Style.space(12)
+                  topPadding: Style.space(2)
 
+                  Repeater {
+                    model: root.calendars
+
+                    Item {
+                      id: chip
+                      required property var modelData
+
+                      readonly property bool hidden: root.hiddenCalendars.indexOf(chip.modelData.name) !== -1
+
+                      width: chipRow.width
+                      height: root.calendarRowHeight
+
+                      Row {
+                        id: chipRow
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Style.space(5)
+
+                        // Filled when the calendar is on, hollow when off:
+                        // the same shape as the dots in the grid, so the row
+                        // reads as a key to them rather than a separate idea.
+                        Rectangle {
+                          anchors.verticalCenter: parent.verticalCenter
+                          width: Style.space(6)
+                          height: width
+                          radius: width / 2
+                          color: chip.hidden ? "transparent" : root.calendarColor(chip.modelData.name)
+                          border.width: chip.hidden ? Style.spacing.hairline : 0
+                          border.color: root.calendarColor(chip.modelData.name)
+                          opacity: chip.hidden ? 0.6 : 1
+                        }
+
+                        Text {
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: root.displayName(chip.modelData.name)
+                          color: chip.hidden
+                            ? Qt.darker(root.contentForeground, 2.4)
+                            : (chipMouse.containsMouse
+                              ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                              : Qt.darker(root.contentForeground, 1.4))
+                          font.family: root.contentFontFamily
+                          font.pixelSize: Style.font.caption
+                        }
+                      }
+
+                      MouseArea {
+                        id: chipMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onClicked: function(mouse) {
+                          if (mouse.button === Qt.RightButton) {
+                            root.addingSubscription = false
+                            // Right-clicking the open one puts the swatches away.
+                            root.startEditingCalendar(chip.modelData.name)
+                          } else {
+                            root.toggleCalendar(chip.modelData.name)
+                          }
+                        }
+                      }
+
+                      PanelToolTip {
+                        visible: chipMouse.containsMouse
+                        text: (chip.hidden ? "Show this calendar" : "Hide this calendar")
+                          + " · right-click to rename or recolour"
+                        fontFamily: root.contentFontFamily
+                      }
+                    }
+                  }
+
+                  // ---- Subscribing to a feed. It sits at the end of the row
+                  //      it adds to, so the place you manage calendars and the
+                  //      place you gain one are the same place.
                   Item {
-                    id: chip
-                    required property var modelData
-
-                    readonly property bool hidden: root.hiddenCalendars.indexOf(chip.modelData.name) !== -1
-
-                    width: chipRow.width
+                    width: addLabel.width
                     height: root.calendarRowHeight
 
-                    Row {
-                      id: chipRow
+                    Text {
+                      id: addLabel
                       anchors.verticalCenter: parent.verticalCenter
-                      spacing: Style.space(5)
-
-                      // Filled when the calendar is on, hollow when off:
-                      // the same shape as the dots in the grid, so the row
-                      // reads as a key to them rather than a separate idea.
-                      Rectangle {
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: Style.space(6)
-                        height: width
-                        radius: width / 2
-                        color: chip.hidden ? "transparent" : root.calendarColor(chip.modelData.name)
-                        border.width: chip.hidden ? Style.spacing.hairline : 0
-                        border.color: root.calendarColor(chip.modelData.name)
-                        opacity: chip.hidden ? 0.6 : 1
-                      }
-
-                      Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: root.displayName(chip.modelData.name)
-                        color: chip.hidden
-                          ? Qt.darker(root.contentForeground, 2.4)
-                          : (chipMouse.containsMouse
-                            ? Style.hoverStateColor(root.contentForeground, Color.accent)
-                            : Qt.darker(root.contentForeground, 1.4))
-                        font.family: root.contentFontFamily
-                        font.pixelSize: Style.font.caption
-                      }
+                      // With calendars beside it the glyph is enough; with
+                      // none it would be a lone mark on an empty row, so it
+                      // says what it does instead.
+                      text: root.addingSubscription
+                        ? "×"
+                        : (root.calendars.length === 0 ? "+  Add a calendar" : "+")
+                      color: addMouse.containsMouse || root.addingSubscription
+                        ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                        : Qt.darker(root.contentForeground, 1.9)
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.body
+                      font.bold: true
                     }
 
                     MouseArea {
-                      id: chipMouse
+                      id: addMouse
                       anchors.fill: parent
+                      anchors.margins: -Style.space(4)
                       hoverEnabled: true
                       cursorShape: Qt.PointingHandCursor
-                      acceptedButtons: Qt.LeftButton | Qt.RightButton
-                      onClicked: function(mouse) {
-                        if (mouse.button === Qt.RightButton) {
-                          root.addingSubscription = false
-                          // Right-clicking the open one puts the swatches away.
-                          root.startEditingCalendar(chip.modelData.name)
-                        } else {
-                          root.toggleCalendar(chip.modelData.name)
-                        }
+                      onClicked: {
+                        if (root.addingSubscription) root.cancelAddingSubscription()
+                        else root.startAddingSubscription()
                       }
                     }
 
                     PanelToolTip {
-                      visible: chipMouse.containsMouse
-                      text: (chip.hidden ? "Show this calendar" : "Hide this calendar")
-                        + " · right-click to rename or recolour"
+                      visible: addMouse.containsMouse
+                      text: root.addingSubscription ? "Cancel" : "Subscribe to a calendar"
                       fontFamily: root.contentFontFamily
                     }
                   }
+
                 }
 
-                // ---- Subscribing to a feed. It sits at the end of the row
-                //      it adds to, so the place you manage calendars and the
-                //      place you gain one are the same place.
-                Item {
-                  width: addLabel.width
+                // ---- The account action, pinned right so it lines up under
+                //      the event count rather than trailing the calendars. It
+                //      concerns the whole account rather than any one calendar,
+                //      and the switches read cleaner without it among them.
+                Text {
+                  id: accountAction
+                  anchors.right: parent.right
+                  anchors.top: parent.top
+                  anchors.topMargin: Style.space(2)
                   height: root.calendarRowHeight
-
-                  Text {
-                    id: addLabel
-                    anchors.verticalCenter: parent.verticalCenter
-                    // With calendars beside it the glyph is enough; with
-                    // none it would be a lone mark on an empty row, so it
-                    // says what it does instead.
-                    text: root.addingSubscription
-                      ? "×"
-                      : (root.calendars.length === 0 ? "+  Add a calendar" : "+")
-                    color: addMouse.containsMouse || root.addingSubscription
-                      ? Style.hoverStateColor(root.contentForeground, Color.accent)
-                      : Qt.darker(root.contentForeground, 1.9)
-                    font.family: root.contentFontFamily
-                    font.pixelSize: Style.font.body
-                    font.bold: true
-                  }
+                  verticalAlignment: Text.AlignVCenter
+                  visible: root.configured
+                  text: root.signedIn ? "Sign out" : (root.showSignIn ? "Cancel" : "Sign in")
+                  color: accountMouse.containsMouse
+                    ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                    : Qt.darker(root.contentForeground, 2.2)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
 
                   MouseArea {
-                    id: addMouse
+                    id: accountMouse
                     anchors.fill: parent
-                    anchors.margins: -Style.space(4)
+                    anchors.margins: -Style.space(5)
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                      if (root.addingSubscription) root.cancelAddingSubscription()
-                      else root.startAddingSubscription()
+                      if (root.signedIn) root.signOut()
+                      else {
+                        root.showSignIn = !root.showSignIn
+                        root.signInError = ""
+                      }
                     }
                   }
 
                   PanelToolTip {
-                    visible: addMouse.containsMouse
-                    text: root.addingSubscription ? "Cancel" : "Subscribe to a calendar"
+                    visible: accountMouse.containsMouse
+                    text: root.signedIn ? "Sign out of the account"
+                      : "Connect an iCloud or CalDAV account"
                     fontFamily: root.contentFontFamily
-                  }
-                }
-
-                Item {
-                  visible: root.configured && !root.signedIn
-                  height: root.calendarRowHeight
-
-                  Text {
-                    id: signInChip
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: root.showSignIn ? "Cancel" : "Sign in"
-                    color: signInChipMouse.containsMouse
-                      ? Style.hoverStateColor(root.contentForeground, Color.accent)
-                      : Qt.darker(root.contentForeground, 2.2)
-                    font.family: root.contentFontFamily
-                    font.pixelSize: Style.font.caption
-                  }
-
-                  MouseArea {
-                    id: signInChipMouse
-                    anchors.fill: parent
-                    anchors.margins: -Style.space(4)
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                      root.showSignIn = !root.showSignIn
-                      root.signInError = ""
-                    }
-                  }
-
-                  PanelToolTip {
-                    visible: signInChipMouse.containsMouse
-                    text: "Connect an iCloud or CalDAV account"
-                    fontFamily: root.contentFontFamily
-                  }
-                }
-
-                Item {
-                  visible: root.signedIn
-                  height: root.calendarRowHeight
-
-                  Text {
-                    id: signOutLabel
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "Sign out"
-                    color: signOutMouse.containsMouse
-                      ? Style.hoverStateColor(root.contentForeground, Color.accent)
-                      : Qt.darker(root.contentForeground, 2.2)
-                    font.family: root.contentFontFamily
-                    font.pixelSize: Style.font.caption
-                  }
-
-                  MouseArea {
-                    id: signOutMouse
-                    anchors.fill: parent
-                    anchors.margins: -Style.space(4)
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.signOut()
                   }
                 }
               }

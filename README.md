@@ -79,6 +79,7 @@ Calendars**, or on a Mac in Calendar under **File → Get Info**.
 | Click an event | Open its details |
 | Click a calendar | Hide or show it |
 | Right-click a calendar | Rename it, or pick its colour |
+| Right-click the year bar | Put the year meter away; the hairline it leaves behind brings it back |
 | `+` | Subscribe to a feed |
 | Scroll / `[` `]` | Previous and next month |
 | `{` `}` | Previous and next year |
