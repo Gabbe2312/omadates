@@ -109,6 +109,21 @@ Panel {
   // look something up, not to unfold the whole day.
   property string expandedEvent: ""
 
+  // ---- Composing. Only calendars the account owns can take a new event: a
+  //      subscribed feed is read-only, and a reminder list holds a different
+  //      kind of thing entirely.
+  readonly property var writableCalendars: cache.writable
+  property bool composing: false
+  property bool creating: false
+  property string composeError: ""
+  property string composeCalendar: ""
+
+  readonly property string composeCalendarName: {
+    var chosen = String(root.composeCalendar || "")
+    if (chosen !== "" && root.writableCalendars.indexOf(chosen) !== -1) return chosen
+    return root.writableCalendars.length > 0 ? String(root.writableCalendars[0]) : ""
+  }
+
   // The helper lives beside this file, wherever the plugin was installed.
   // there is nothing on PATH to rely on for a plugin someone downloaded.
   readonly property string pluginDir: String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "")
@@ -434,6 +449,75 @@ Panel {
     mapProcess.running = true
   }
 
+  function startComposing() {
+    root.composeError = ""
+    root.composing = true
+    Qt.callLater(function() {
+      titleField.text = ""
+      placeField.text = ""
+      notesField.text = ""
+      allDayBox = false
+      startField.text = Events.defaultStartClock(root.selectedKey, root.todayKey, new Date())
+      endField.text = Events.shiftClock(startField.text, 60)
+      titleField.forceActiveFocus()
+    })
+  }
+
+  function cancelComposing() {
+    root.composing = false
+    root.composeError = ""
+    Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
+  }
+
+  property bool allDayBox: false
+
+  // The payload goes over stdin as JSON: a title or a note can hold quotes
+  // and newlines, and none of that belongs in a process list.
+  function createEvent() {
+    var title = String(titleField.text || "").replace(/^\s+|\s+$/g, "")
+    if (title === "") {
+      root.composeError = "A title is needed"
+      return
+    }
+    if (root.composeCalendarName === "") {
+      root.composeError = "No calendar can take an event"
+      return
+    }
+
+    var payload = {
+      calendar: root.composeCalendarName,
+      summary: title,
+      location: String(placeField.text || "").replace(/^\s+|\s+$/g, ""),
+      description: String(notesField.text || ""),
+      allDay: root.allDayBox
+    }
+
+    if (root.allDayBox) {
+      payload.start = root.selectedKey
+    } else {
+      var from = Events.normalizeClock(startField.text)
+      var to = Events.normalizeClock(endField.text)
+      if (from === "" || to === "") {
+        root.composeError = "Times read as HH:MM"
+        return
+      }
+      payload.start = root.selectedKey + "T" + from
+      // An end at or before the start runs into the next day. The form marks
+      // it, so nothing is decided behind your back.
+      payload.end = (Events.crossesMidnight(from, to)
+        ? Model.keyForDate(new Date(root.selectedDate.getTime() + 86400000))
+        : root.selectedKey) + "T" + to
+    }
+
+    root.composeError = ""
+    root.creating = true
+    root.pendingPayload = JSON.stringify(payload)
+    createProcess.command = root.syncCommand.concat(["create"])
+    createProcess.running = true
+  }
+
+  property string pendingPayload: ""
+
   function toggleEventDetail(event) {
     var key = Events.eventKey(event)
     root.expandedEvent = root.expandedEvent === key ? "" : key
@@ -653,6 +737,27 @@ Panel {
   }
 
   Process {
+    id: createProcess
+    stdinEnabled: true
+    onStarted: {
+      write(root.pendingPayload)
+      stdinEnabled = false
+    }
+    onExited: function(exitCode) {
+      root.pendingPayload = ""
+      root.creating = false
+      if (exitCode === 0) {
+        root.composing = false
+        root.composeError = ""
+        Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
+      } else {
+        root.composeError = "Could not create it. See the sync line below"
+      }
+      calendarCache.reload()
+    }
+  }
+
+  Process {
     id: logoutProcess
     onExited: calendarCache.reload()
   }
@@ -717,7 +822,7 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       blocked: root.editingLife || root.addingSubscription
-        || root.calendarEditing !== "" || root.signInVisible
+        || root.calendarEditing !== "" || root.signInVisible || root.composing
       onMoveRequested: function(dx, dy) {
         if (dx !== 0) root.moveMonth(dx)
         if (dy !== 0) root.moveYear(dy)
@@ -1786,6 +1891,305 @@ Panel {
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.caption
                 wrapMode: Text.WordWrap
+              }
+
+              // ---- Adding one. The grid is the date picker: the day you
+              //      are looking at is the day it lands on, so the form asks
+              //      only for what the calendar cannot already tell it.
+              Item {
+                width: parent.width
+                height: composeAction.implicitHeight + Style.space(4)
+                visible: !root.signInVisible && root.missingPackages.length === 0
+                  && root.writableCalendars.length > 0
+
+                Text {
+                  id: composeAction
+                  anchors.left: parent.left
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: root.composing ? "×  Cancel" : "+  New event"
+                  color: composeMouse.containsMouse || root.composing
+                    ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                    : Qt.darker(root.contentForeground, 1.9)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+
+                  MouseArea {
+                    id: composeMouse
+                    anchors.fill: parent
+                    anchors.margins: -Style.space(5)
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                      if (root.composing) root.cancelComposing()
+                      else root.startComposing()
+                    }
+                  }
+                }
+              }
+
+              Column {
+                width: parent.width
+                visible: root.composing
+                spacing: Style.space(5)
+
+                TextField {
+                  id: titleField
+                  width: parent.width
+                  placeholderText: "Title"
+                  foreground: root.contentForeground
+                  font.family: root.contentFontFamily
+                  Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_Escape) { root.cancelComposing(); event.accepted = true }
+                    else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                      root.createEvent(); event.accepted = true
+                    }
+                  }
+                }
+
+                TextField {
+                  id: placeField
+                  width: parent.width
+                  placeholderText: "Place"
+                  foreground: root.contentForeground
+                  font.family: root.contentFontFamily
+                  Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_Escape) { root.cancelComposing(); event.accepted = true }
+                  }
+                }
+
+                TextField {
+                  id: notesField
+                  width: parent.width
+                  placeholderText: "Notes"
+                  foreground: root.contentForeground
+                  font.family: root.contentFontFamily
+                  Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_Escape) { root.cancelComposing(); event.accepted = true }
+                  }
+                }
+
+                // ---- When. The date is the day the grid is showing, stated
+                //      rather than asked for, so there is one less thing to
+                //      type and no second place for it to disagree.
+                Row {
+                  width: parent.width
+                  spacing: Style.space(8)
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(74)
+                    text: Qt.formatDate(root.selectedDate, "d MMM").toUpperCase()
+                    color: Qt.darker(root.contentForeground, 1.4)
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    font.letterSpacing: 1
+                  }
+
+                  TextField {
+                    id: startField
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(62)
+                    enabled: !root.allDayBox
+                    opacity: enabled ? 1 : 0.4
+                    placeholderText: "09:00"
+                    foreground: root.contentForeground
+                    font.family: root.contentFontFamily
+                    // Retyping the end every time the start moves is busywork,
+                    // so it follows along until it is set by hand.
+                    onEditingFinished: {
+                      var tidy = Events.normalizeClock(startField.text)
+                      if (tidy !== "") startField.text = tidy
+                      if (!Events.endsAfterStart(startField.text, endField.text))
+                        endField.text = Events.shiftClock(startField.text, 60)
+                    }
+                  }
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "→"
+                    color: Qt.darker(root.contentForeground, 1.9)
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                    opacity: root.allDayBox ? 0.4 : 1
+                  }
+
+                  TextField {
+                    id: endField
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(62)
+                    enabled: !root.allDayBox
+                    opacity: enabled ? 1 : 0.4
+                    placeholderText: "10:00"
+                    foreground: root.contentForeground
+                    font.family: root.contentFontFamily
+                    onEditingFinished: {
+                      var tidy = Events.normalizeClock(endField.text)
+                      if (tidy !== "") endField.text = tidy
+                    }
+                  }
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: !root.allDayBox
+                      && Events.crossesMidnight(startField.text, endField.text)
+                    text: "+1"
+                    color: Qt.darker(root.contentForeground, 1.5)
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+
+                    MouseArea {
+                      id: nextDayMouse
+                      anchors.fill: parent
+                      anchors.margins: -Style.space(3)
+                      hoverEnabled: true
+                    }
+
+                    PanelToolTip {
+                      visible: nextDayMouse.containsMouse
+                      text: "Ends the next day"
+                      fontFamily: root.contentFontFamily
+                    }
+                  }
+
+                  // The click target is a sibling of the row rather than a
+                  // child of it: a positioner refuses to lay out anything
+                  // anchored, and silently stops laying out the rest too.
+                  Item {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: allDayRow.width
+                    height: allDayRow.height
+
+                    Row {
+                      id: allDayRow
+                      spacing: Style.space(5)
+
+                      Rectangle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Style.space(11)
+                        height: width
+                        radius: Style.cornerRadius > 0 ? Style.space(3) : 0
+                        color: root.allDayBox
+                          ? Style.selectedStateColor(root.contentForeground, Color.accent)
+                          : "transparent"
+                        border.width: root.allDayBox ? 0 : Style.spacing.hairline
+                        border.color: Qt.darker(root.contentForeground, 1.7)
+                      }
+
+                      Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "All day"
+                        color: allDayMouse.containsMouse
+                          ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                          : Qt.darker(root.contentForeground, 1.6)
+                        font.family: root.contentFontFamily
+                        font.pixelSize: Style.font.caption
+                      }
+                    }
+
+                    MouseArea {
+                      id: allDayMouse
+                      anchors.fill: parent
+                      anchors.margins: -Style.space(4)
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: root.allDayBox = !root.allDayBox
+                    }
+                  }
+                }
+
+                // ---- Which calendar, and the button. Only the writable ones
+                //      are offered, so there is no way to pick a place the
+                //      event cannot go.
+                Item {
+                  width: parent.width
+                  height: Math.max(composeCalendars.implicitHeight, createButton.implicitHeight)
+
+                  Flow {
+                    id: composeCalendars
+                    anchors.left: parent.left
+                    anchors.right: createButton.left
+                    anchors.rightMargin: Style.space(12)
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Style.space(10)
+
+                    Repeater {
+                      model: root.writableCalendars
+
+                      Item {
+                        id: pick
+                        required property var modelData
+                        readonly property bool chosen: String(pick.modelData) === root.composeCalendarName
+                        width: pickRow.width
+                        height: pickRow.height
+
+                        Row {
+                          id: pickRow
+                          spacing: Style.space(5)
+
+                          Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Style.space(6)
+                            height: width
+                            radius: width / 2
+                            color: pick.chosen ? root.calendarColor(pick.modelData) : "transparent"
+                            border.width: pick.chosen ? 0 : Style.spacing.hairline
+                            border.color: root.calendarColor(pick.modelData)
+                          }
+
+                          Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.displayName(pick.modelData)
+                            color: pick.chosen
+                              ? root.contentForeground
+                              : Qt.darker(root.contentForeground, 2.1)
+                            font.family: root.contentFontFamily
+                            font.pixelSize: Style.font.caption
+                          }
+                        }
+
+                        MouseArea {
+                          anchors.fill: parent
+                          anchors.margins: -Style.space(4)
+                          cursorShape: Qt.PointingHandCursor
+                          onClicked: root.composeCalendar = String(pick.modelData)
+                        }
+                      }
+                    }
+                  }
+
+                  Text {
+                    id: createButton
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.creating ? "Creating…" : "Create"
+                    color: createMouse.containsMouse
+                      ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                      : root.contentForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.bold: true
+
+                    MouseArea {
+                      id: createMouse
+                      anchors.fill: parent
+                      anchors.margins: -Style.space(5)
+                      hoverEnabled: true
+                      enabled: !root.creating
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: root.createEvent()
+                    }
+                  }
+                }
+
+                Text {
+                  width: parent.width
+                  visible: root.composeError !== ""
+                  text: root.composeError
+                  color: Qt.darker(root.contentForeground, 1.3)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  wrapMode: Text.WordWrap
+                }
               }
 
               // ---- Calendars, doubling as the legend and the switches.

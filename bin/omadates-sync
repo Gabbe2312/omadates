@@ -9,6 +9,7 @@ Subcommands (the panel drives all of these; they also work by hand):
     sync                  Refresh the cache. The default.
     login <apple-id>      Store a password read from stdin, then sync.
     logout                Forget the account and its password.
+    create                Write one event, read as JSON on stdin.
     map <location>        Open a location in the system's map handler.
     subscribe <url>       Add a webcal:// or https://….ics feed, then sync.
     unsubscribe <url>     Drop a feed, then sync.
@@ -22,6 +23,7 @@ import os
 import subprocess
 import sys
 import traceback
+import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
@@ -170,6 +172,23 @@ def calendar_color(calendar):
     except Exception:
         pass
     return ""
+
+
+def takes_events(calendar):
+    """Whether a collection accepts VEVENT at all.
+
+    An account's reminder list is a calendar as far as CalDAV is concerned,
+    but it holds VTODO, and offering it as somewhere to put an appointment
+    would be offering a mistake. A server that declines to say is taken at
+    its word rather than excluded.
+    """
+    try:
+        components = calendar.get_supported_components()
+    except Exception:
+        return True
+    if not components:
+        return True
+    return "VEVENT" in components
 
 
 def calendar_name(calendar, fallback):
@@ -336,6 +355,110 @@ def missing_dependencies():
 def shutil_which(name):
     import shutil
     return shutil.which(name)
+
+
+def parse_local(text, tz):
+    """An ISO-ish local timestamp from the panel, without a timezone on it."""
+    value = str(text or "").strip().replace(" ", "T")
+    for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt).replace(tzinfo=tz)
+        except ValueError:
+            continue
+    raise ValueError(f"could not read the time '{text}'")
+
+
+def cmd_create(args):
+    """Write one event to a CalDAV calendar.
+
+    The payload arrives as JSON on stdin rather than as arguments: a summary
+    or a note can hold quotes, newlines and anything else a shell would take
+    an interest in, and none of that belongs in a process list either.
+
+    Subscribed feeds are read-only by nature, so only calendars the account
+    actually owns can be named here.
+    """
+    import icalendar
+
+    try:
+        payload = json.loads(sys.stdin.read() or "{}")
+    except Exception as exc:
+        print(f"omadates-sync: unreadable payload: {exc}", file=sys.stderr)
+        return 2
+    if not isinstance(payload, dict):
+        print("omadates-sync: payload must be an object", file=sys.stderr)
+        return 2
+
+    summary = str(payload.get("summary") or "").strip()
+    target = str(payload.get("calendar") or "").strip()
+    if not summary:
+        return fail("an event needs a title")
+    if not target:
+        return fail("no calendar chosen")
+
+    config = load_config()
+    username = str(config.get("username") or "").strip()
+    if not username:
+        return fail("not signed in")
+
+    tz = local_tz()
+    all_day = payload.get("allDay") is True
+    try:
+        start = parse_local(payload.get("start"), tz)
+        end = parse_local(payload.get("end"), tz) if payload.get("end") else None
+    except ValueError as exc:
+        return fail(str(exc))
+    if end is None or end <= start:
+        end = start + timedelta(days=1 if all_day else 0, hours=0 if all_day else 1)
+
+    event = icalendar.Event()
+    event.add("summary", summary)
+    if payload.get("location"):
+        event.add("location", str(payload["location"]).strip())
+    if payload.get("description"):
+        event.add("description", str(payload["description"]))
+    if all_day:
+        event.add("dtstart", start.date())
+        event.add("dtend", max(end.date(), start.date() + timedelta(days=1)))
+    else:
+        # UTC rather than a local TZID. A bare abbreviation like CEST is not a
+        # timezone identifier, and a real one obliges the file to carry a
+        # VTIMEZONE block describing it. UTC needs neither and every server
+        # reads it the same way; the phone renders it back in local time.
+        event.add("dtstart", start.astimezone(timezone.utc))
+        event.add("dtend", end.astimezone(timezone.utc))
+    event.add("dtstamp", datetime.now(timezone.utc))
+    event.add("uid", f"{uuid.uuid4()}@omadates")
+
+    calendar = icalendar.Calendar()
+    calendar.add("prodid", "-//omadates//EN")
+    calendar.add("version", "2.0")
+    calendar.add_component(event)
+
+    if payload.get("dryRun") is True:
+        print(calendar.to_ical().decode())
+        return 0
+
+    import caldav
+    try:
+        password = keyring_lookup(username)
+        client = caldav.DAVClient(url=str(config["url"]), username=username, password=password)
+        calendars = client.principal().calendars()
+    except Exception as exc:
+        return fail(friendly_error(exc))
+
+    for candidate in calendars:
+        if calendar_name(candidate, "") == target:
+            try:
+                candidate.save_event(calendar.to_ical().decode())
+            except Exception as exc:
+                return fail(friendly_error(exc))
+            break
+    else:
+        return fail(f"no calendar named '{target}'")
+
+    print(f"omadates-sync: created '{summary}'")
+    return cmd_sync()
 
 
 def cmd_map(args):
@@ -529,6 +652,10 @@ def cmd_sync():
     wanted = [str(n) for n in (config.get("calendars") or [])]
 
     events, seen, problems = [], [], []
+    # Named separately because the panel has to know where an event may be
+    # written. A subscribed feed is read-only by nature, and a calendar with
+    # nothing in it is still a place to put something.
+    writable = []
 
     if username:
         import caldav
@@ -542,6 +669,8 @@ def cmd_sync():
         for calendar in calendars:
             name = calendar_name(calendar, "Calendar")
             seen.append(name)
+            if takes_events(calendar):
+                writable.append(name)
             if wanted and name not in wanted:
                 continue
             try:
@@ -570,6 +699,7 @@ def cmd_sync():
         "checkedAt": datetime.now(timezone.utc).isoformat(),
         "syncedAt": datetime.now(timezone.utc).isoformat(),
         "availableCalendars": seen,
+        "writableCalendars": writable,
         "events": events,
     })
     print(f"omadates-sync: {len(events)} events from {len(seen)} calendars")
@@ -586,6 +716,8 @@ def main(argv):
         return cmd_check()
     if command == "map":
         return cmd_map(rest)
+    if command == "create":
+        return cmd_create(rest)
     if command == "login":
         return cmd_login(rest)
     if command == "logout":

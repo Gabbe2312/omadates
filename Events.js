@@ -36,7 +36,7 @@ function parseCache(text) {
     // The helper states these on every write so the panel can tell "never
     // signed in" from "packages missing" from "the network is down", and each
     // has a different next step for whoever is looking at it.
-    configured: false, signedIn: false, missing: []
+    configured: false, signedIn: false, missing: [], writable: []
   }
   var raw = String(text || "").replace(/^\s+|\s+$/g, "")
   if (raw === "") return empty
@@ -62,6 +62,7 @@ function parseCache(text) {
     error: String(parsed.error || ""),
     syncedAt: String(parsed.syncedAt || ""),
     configured: parsed.configured === true,
+    writable: parsed.writableCalendars instanceof Array ? parsed.writableCalendars : [],
     signedIn: parsed.signedIn === true,
     missing: parsed.missing instanceof Array ? parsed.missing : [],
     events: events
@@ -295,6 +296,64 @@ function timeLabel(event, dayKey) {
   if (event.allDay) return "All day"
   if (dayKey && event.dayKey !== String(dayKey)) return "All day"
   return pad2(event.startHour) + ":" + pad2(event.startMinute)
+}
+
+// ---- Composing a new event. Times are typed rather than picked: a clock
+// widget is a lot of panel for something everyone can already write, and
+// "14:30" is unambiguous in a way a spinner is not.
+
+// Accepts 9, 9:5, 0900, 09.30 and 21:45. People type times a dozen ways and
+// none of them are wrong.
+function parseClock(text) {
+  var raw = String(text || "").replace(/\s+/g, "")
+  if (raw === "") return null
+  var m = /^(\d{1,2})[:.,]?(\d{2})?$/.exec(raw)
+  if (!m) return null
+  var h = parseInt(m[1], 10)
+  var min = m[2] === undefined ? 0 : parseInt(m[2], 10)
+  if (!isFinite(h) || !isFinite(min) || h > 23 || min > 59) return null
+  return { hour: h, minute: min }
+}
+
+function clockLabel(hour, minute) {
+  return pad2(hour) + ":" + pad2(minute)
+}
+
+// Tidy on the way out, so what was typed becomes what is stored.
+function normalizeClock(text) {
+  var t = parseClock(text)
+  return t === null ? "" : clockLabel(t.hour, t.minute)
+}
+
+function shiftClock(text, minutes) {
+  var t = parseClock(text)
+  if (t === null) return ""
+  var total = ((t.hour * 60 + t.minute + minutes) % 1440 + 1440) % 1440
+  return clockLabel(Math.floor(total / 60), total % 60)
+}
+
+// On today, the next full hour, because an event you are adding now is
+// almost never in the past. On any other day, a plain working hour.
+function defaultStartClock(dayKey, todayKey, now) {
+  if (String(dayKey) !== String(todayKey)) return "09:00"
+  var hour = now.getHours() + 1
+  return hour > 23 ? "23:00" : clockLabel(hour, 0)
+}
+
+function endsAfterStart(startText, endText) {
+  var a = parseClock(startText), b = parseClock(endText)
+  if (a === null || b === null) return false
+  return (b.hour * 60 + b.minute) > (a.hour * 60 + a.minute)
+}
+
+// An end at or before the start is not a mistake to reject: an event that
+// begins at 23:00 and runs an hour ends at midnight, and refusing that would
+// make the last hour of the day unusable. It runs into the next day instead,
+// and the form says so rather than deciding quietly.
+function crossesMidnight(startText, endText) {
+  var a = parseClock(startText), b = parseClock(endText)
+  if (a === null || b === null) return false
+  return (b.hour * 60 + b.minute) <= (a.hour * 60 + a.minute)
 }
 
 // A stable identity for one event, so a row can be remembered as expanded

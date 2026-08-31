@@ -91,6 +91,7 @@ Calendars**, or on a Mac in Calendar under **File → Get Info**.
 | Click a day | Show that day's events |
 | Click an event | Open its details |
 | Click the address in an open event | Open it in maps |
+| `+ New event` | Add one to the day you are looking at |
 | Click a calendar | Hide or show it |
 | Right-click a calendar | Rename it, or pick its colour |
 | Right-click the year bar | Put the year meter away; the hairline it leaves behind brings it back |
@@ -111,6 +112,23 @@ stays its identity underneath.
 
 Everything the stock Omarchy clock does is still there: the label formats on
 right-click, the year bar, the timezone picker, memento mori.
+
+## Adding an event
+
+`+ New event` under the day's list. The grid is the date picker: whichever day
+you are looking at is the day it lands on, so the form asks only for what the
+calendar cannot already tell it.
+
+Times are typed rather than picked, and read loosely: `9`, `0900`, `09.30` and
+`21:45` all work. An end at or before the start runs into the next day, marked
+`+1` beside the field rather than decided quietly.
+
+Only calendars your account owns are offered. A subscribed feed is read-only
+by nature, and a reminder list holds a different kind of thing, so neither
+appears in the picker.
+
+It goes straight to the server, which means it reaches your phone the same way
+an event made on a Mac does.
 
 ## How it syncs
 
