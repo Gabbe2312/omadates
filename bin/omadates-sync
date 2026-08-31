@@ -24,7 +24,7 @@ import traceback
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
-APP = "icalendar"
+APP = "omadates"
 KEYRING_SERVICE = "io.github.gabbe2312.calendar"
 
 CONFIG_PATH = Path.home() / ".config" / "omarchy" / APP / "config.json"
@@ -247,7 +247,7 @@ def fetch_subscription(entry, start, end, tz):
     if url.startswith("webcal://"):
         url = "https://" + url[len("webcal://"):]
 
-    response = requests.get(url, timeout=30, headers={"User-Agent": "omarchy-icalendar"})
+    response = requests.get(url, timeout=30, headers={"User-Agent": "omadates"})
     response.raise_for_status()
     # The raw bytes, not response.text: requests falls back to ISO-8859-1 for
     # text/* without a declared charset, which turns every accented letter into
@@ -314,7 +314,7 @@ def fail(message):
         "syncedAt": synced_at,
         "events": events,
     })
-    print(f"icalendar-sync: {message}", file=sys.stderr)
+    print(f"omadates-sync: {message}", file=sys.stderr)
     return 1
 
 
@@ -400,7 +400,7 @@ def cmd_logout():
         "status": "empty", "error": "", "syncedAt": "",
         "checkedAt": datetime.now(timezone.utc).isoformat(), "events": [],
     })
-    print("icalendar-sync: signed out")
+    print("omadates-sync: signed out")
     return 0
 
 
@@ -506,7 +506,7 @@ def cmd_sync():
         "availableCalendars": seen,
         "events": events,
     })
-    print(f"icalendar-sync: {len(events)} events from {len(seen)} calendars")
+    print(f"omadates-sync: {len(events)} events from {len(seen)} calendars")
     return 0
 
 
@@ -528,7 +528,7 @@ def main(argv):
         return cmd_unsubscribe(rest)
     if command == "sync":
         return cmd_sync()
-    print(f"icalendar-sync: unknown command '{command}'. Try --help.", file=sys.stderr)
+    print(f"omadates-sync: unknown command '{command}'. Try --help.", file=sys.stderr)
     return 2
 
 

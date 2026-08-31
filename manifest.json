@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "id": "io.github.gabbe2312.calendar",
-  "name": "iCalendar",
+  "name": "Omadates",
   "version": "1.0.0",
   "author": "Gabbe2312",
   "license": "MIT",
-  "description": "Replaces the Omarchy clock with one that carries your calendar: dots on days that have something, today's events under the grid, and a click for the details. Syncs iCloud, any CalDAV server, and webcal subscriptions.",
-  "homepage": "https://github.com/Gabbe2312/omarchy-icalendar",
+  "description": "Apple Calendar in your Omarchy bar. Dots on the days that have something, today's events under the month grid, and a click for the details. Syncs iCloud, any CalDAV server, and webcal subscriptions.",
+  "homepage": "https://github.com/Gabbe2312/omadates",
   "kinds": [
     "bar-widget"
   ],
@@ -14,8 +14,8 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "iCalendar",
-    "description": "Clock with your calendar in the popup",
+    "displayName": "Omadates",
+    "description": "Apple Calendar and CalDAV in the clock popup",
     "category": "Time",
     "defaultSection": "center",
     "allowMultiple": false

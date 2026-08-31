@@ -102,7 +102,7 @@ Panel {
   // The helper lives beside this file, wherever the plugin was installed —
   // there is nothing on PATH to rely on for a plugin someone downloaded.
   readonly property string pluginDir: String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "")
-  readonly property var syncCommand: [root.pluginDir + "bin/icalendar-sync"]
+  readonly property var syncCommand: [root.pluginDir + "bin/omadates-sync"]
 
   // Sign-in state. The password is held only between the click and the
   // helper reading it off stdin, and never touches disk on the way.
@@ -558,7 +558,7 @@ Panel {
   // file and the panel never parses half a cache.
   FileView {
     id: calendarCache
-    path: Quickshell.env("HOME") + "/.cache/omarchy/icalendar/events.json"
+    path: Quickshell.env("HOME") + "/.cache/omarchy/omadates/events.json"
     watchChanges: true
     printErrors: false
     onFileChanged: reload()

@@ -1,6 +1,6 @@
-# iCalendar
+# Omadates
 
-The Omarchy clock, with your calendar in it.
+Apple Calendar in your Omarchy bar.
 
 Days that have something on them carry a dot in the calendar popup, coloured
 by which calendar it belongs to. Today's events sit under the month grid, and
@@ -18,7 +18,7 @@ carries but iCloud never stores.
 
 ```bash
 omarchy pkg add python-caldav python-icalendar python-recurring-ical-events python-httpx libsecret
-omarchy plugin add https://github.com/Gabbe2312/omarchy-icalendar.git --enable
+omarchy plugin add https://github.com/Gabbe2312/omadates.git --enable
 ```
 
 The packages are separate because a plugin cannot install system packages for
@@ -91,7 +91,7 @@ the year bar, the timezone picker, memento mori — is still there.
 ## How it syncs
 
 The shell never touches the network. A helper writes
-`~/.cache/omarchy/icalendar/events.json`, and the panel watches that one file
+`~/.cache/omarchy/omadates/events.json`, and the panel watches that one file
 and redraws. So the popup opens instantly, and it still shows the last good
 answer when you are offline.
 
@@ -100,7 +100,7 @@ open the panel if the cache has gone stale. No system timer to install.
 
 ## Configuration
 
-`~/.config/omarchy/icalendar/config.json`:
+`~/.config/omarchy/omadates/config.json`:
 
 | Key | Meaning |
 |---|---|
@@ -113,17 +113,17 @@ open the panel if the cache has gone stale. No system timer to install.
 The helper is also a small CLI, if you would rather script it:
 
 ```bash
-bin/icalendar-sync            # refresh now
-bin/icalendar-sync check      # report missing packages
-bin/icalendar-sync subscribe <url>
-bin/icalendar-sync logout
+bin/omadates-sync            # refresh now
+bin/omadates-sync check      # report missing packages
+bin/omadates-sync subscribe <url>
+bin/omadates-sync logout
 ```
 
 ## Removing it
 
 ```bash
 omarchy plugin remove io.github.gabbe2312.calendar
-rm -rf ~/.config/omarchy/icalendar ~/.cache/omarchy/icalendar
+rm -rf ~/.config/omarchy/omadates ~/.cache/omarchy/omadates
 secret-tool clear service io.github.gabbe2312.calendar
 ```
 
