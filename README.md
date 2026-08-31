@@ -39,6 +39,9 @@ that still resolves alone, and never claims a blank one, since blank means
 
 ## Signing in
 
+Optional. A subscribed feed works on its own, so if all you want is a
+timetable or a holiday calendar, skip to the next section.
+
 Open the clock in the bar and fill in the two fields.
 
 ![Signing in](docs/sign-in.png)
@@ -104,7 +107,7 @@ open the panel if the cache has gone stale. No system timer to install.
 
 | Key | Meaning |
 |---|---|
-| `url` | CalDAV endpoint. Defaults to iCloud; point it at any server. |
+| `url` | CalDAV endpoint. Defaults to iCloud; Fastmail, Nextcloud and Radicale work the same way. |
 | `username` | Your account. Set by signing in. |
 | `daysBack` / `daysAhead` | How much of the calendar to keep cached. |
 | `calendars` | Only fetch these calendar names. Empty means all of them. |

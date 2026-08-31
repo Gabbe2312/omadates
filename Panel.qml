@@ -178,6 +178,11 @@ Panel {
   // make the whole grid twitch.
   readonly property int dotRailOffset: Style.space(3)
 
+  // Everything in the calendar row shares one height and centres inside it.
+  // A Flow aligns its children by their top edge, so items whose glyphs differ in
+  // size would otherwise each sit on a line of their own.
+  readonly property int calendarRowHeight: Math.round(Style.font.body * 1.5)
+
   readonly property int cellWidth: Style.space(52)
   readonly property int cellHeight: Style.space(34)
   readonly property int cellSpacing: Style.space(2)
@@ -1547,6 +1552,18 @@ Panel {
                   font.pixelSize: Style.font.caption
                   wrapMode: Text.WordWrap
                 }
+
+                // An account is not actually required — a subscribed feed
+                // works on its own — but the form above says otherwise by
+                // being the only thing on offer. So it says so.
+                Text {
+                  width: parent.width
+                  text: "Or skip this: + below subscribes to a calendar feed, no account needed"
+                  color: Qt.darker(root.contentForeground, 2.1)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  wrapMode: Text.WordWrap
+                }
               }
 
               Text {
@@ -1584,10 +1601,11 @@ Panel {
                     readonly property bool hidden: root.hiddenCalendars.indexOf(chip.modelData.name) !== -1
 
                     width: chipRow.width
-                    height: chipRow.height
+                    height: root.calendarRowHeight
 
                     Row {
                       id: chipRow
+                      anchors.verticalCenter: parent.verticalCenter
                       spacing: Style.space(5)
 
                       // Filled when the calendar is on, hollow when off —
@@ -1648,10 +1666,11 @@ Panel {
                 //      place you gain one are the same place.
                 Item {
                   width: addLabel.width
-                  height: addLabel.height
+                  height: root.calendarRowHeight
 
                   Text {
                     id: addLabel
+                    anchors.verticalCenter: parent.verticalCenter
                     text: root.addingSubscription ? "×" : "+"
                     color: addMouse.containsMouse || root.addingSubscription
                       ? Style.hoverStateColor(root.contentForeground, Color.accent)
@@ -1683,10 +1702,11 @@ Panel {
                 Item {
                   visible: root.cache.signedIn === true
                   width: visible ? signOutLabel.width : 0
-                  height: signOutLabel.height
+                  height: root.calendarRowHeight
 
                   Text {
                     id: signOutLabel
+                    anchors.verticalCenter: parent.verticalCenter
                     text: "Sign out"
                     color: signOutMouse.containsMouse
                       ? Style.hoverStateColor(root.contentForeground, Color.accent)
