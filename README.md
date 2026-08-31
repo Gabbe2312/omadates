@@ -147,6 +147,8 @@ right-click, the year bar, the timezone picker, memento mori.
 you are looking at is the day it lands on, so the form asks only for what the
 calendar cannot already tell it.
 
+![Adding an event](docs/new-event.png)
+
 Times are typed rather than picked, and read loosely: `9`, `0900`, `09.30` and
 `21:45` all work. An end at or before the start runs into the next day, marked
 `+1` beside the field rather than decided quietly.
