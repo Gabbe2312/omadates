@@ -346,29 +346,35 @@ def last_good():
 
 
 def edit_cache(change):
-    """Apply a change to the cached events without going back to the server.
+    """Apply a change to the whole cache without going back to the server.
 
     The write has already happened; making someone wait out a full re-sync
     before the panel admits it turns a one-second action into five, and into
     an indefinite wait on a bad line. The next scheduled sync reconciles.
+
+    The change is handed the entire cache rather than only its events: the
+    panel reads colours from the calendar list, and touching one without the
+    other leaves the two disagreeing about what colour a calendar is.
     """
     try:
         cache = json.loads(CACHE_PATH.read_text())
     except Exception:
         return
-    if not isinstance(cache, dict) or not isinstance(cache.get("events"), list):
+    if not isinstance(cache, dict):
         return
-    cache["events"] = change(cache["events"])
-    cache["events"].sort(key=lambda e: (e.get("start", ""), e.get("summary", "")))
+    change(cache)
+    if isinstance(cache.get("events"), list):
+        cache["events"].sort(key=lambda e: (e.get("start", ""), e.get("summary", "")))
     write_cache(cache)
 
 
 def cached_colour(name):
+    """The colour the calendar list already knows, for an event written now."""
     try:
         cache = json.loads(CACHE_PATH.read_text())
-        for event in cache.get("events", []):
-            if event.get("calendar") == name:
-                return event.get("color", "")
+        for entry in cache.get("calendars", []):
+            if entry.get("name") == name:
+                return entry.get("color", "")
     except Exception:
         pass
     return ""
@@ -510,7 +516,9 @@ def cmd_create(args):
 
     built = build_event(event, tz, target, cached_colour(target), subscribed=False)
     if built:
-        edit_cache(lambda events: events + [built])
+        def add(cache):
+            cache.setdefault("events", []).append(built)
+        edit_cache(add)
     print(f"omadates-sync: created '{summary}'")
     return 0
 
@@ -594,7 +602,9 @@ def cmd_delete(args):
     else:
         return fail(f"no calendar named '{target}'")
 
-    edit_cache(lambda events: [e for e in events if e.get("uid") != uid])
+    def drop(cache):
+        cache["events"] = [e for e in cache.get("events", []) if e.get("uid") != uid]
+    edit_cache(drop)
     print(f"omadates-sync: deleted {uid}")
     return 0
 
@@ -767,11 +777,15 @@ def cmd_colour(args):
     else:
         return fail(f"no calendar named '{target}'")
 
-    def recolour(events):
-        for event in events:
+    def recolour(cache):
+        for event in cache.get("events", []):
             if event.get("calendar") == target:
                 event["color"] = colour
-        return events
+        # The dot beside the name is drawn from this list, not from the
+        # events, so it is the half that actually shows.
+        for entry in cache.get("calendars", []):
+            if entry.get("name") == target:
+                entry["color"] = colour
 
     edit_cache(recolour)
     print(f"omadates-sync: {target} is now {colour}")
