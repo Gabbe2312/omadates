@@ -871,10 +871,18 @@ Panel {
     // above is already watching it.
   }
 
-  // How often to ask. Zero stops the asking and leaves only the full sync
-  // below, for anyone who would rather not have the network touched every
-  // minute.
-  readonly property int pollSeconds: Math.max(0, Number(setting("pollSeconds", 60)) || 0)
+  // How often to ask in the background. Opening the panel always asks, and
+  // that is the moment that matters: nothing outside the panel shows an
+  // event, so a check nobody is waiting on buys very little. This interval
+  // only decides how fresh the first paint is before the on-open check
+  // corrects it a second or two later.
+  //
+  // Every minute would cost almost no CPU but would wake the radio 1440
+  // times a day for a calendar looked at maybe ten times, which is the real
+  // price on a laptop. Five minutes is the same experience for a fifth of
+  // the wakeups. Set pollSeconds on the widget to taste; 0 leaves only the
+  // quarter-hour sync.
+  readonly property int pollSeconds: Math.max(0, Number(setting("pollSeconds", 300)) || 0)
 
   Timer {
     interval: Math.max(15, root.pollSeconds) * 1000

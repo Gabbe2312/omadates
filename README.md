@@ -142,18 +142,26 @@ The shell never touches the network. A helper writes
 and redraws. So the popup opens instantly, and it still shows the last good
 answer when you are offline.
 
-Every minute the shell asks the server whether anything changed. That question
+Opening the panel asks the server whether anything changed, and every five
+minutes the shell asks again in the background. That question
 is answered by a sync token: an opaque string per calendar that changes when
 its contents do, so the server does the comparing and the answer costs a
 fifth of a second. Only when it comes back different is anything fetched. An
-event added on your phone lands here inside a minute.
+event added on your phone is there the moment you look, and within five
+minutes even if you do not.
+
+Nothing outside the panel shows an event, so a check nobody is waiting on
+buys little. Asking every minute would cost almost no CPU — a sixth of a
+second of work — but would wake the radio 1440 times a day for a calendar
+you open maybe ten times, and that is the real price on a laptop.
 
 A full pass still runs every quarter of an hour, because subscribed feeds
 carry no such token and a plain sweep repairs anything the tokens missed. No
 system timer to install for either.
 
-Set `pollSeconds` on the widget in `shell.json` to change the interval, or to
-`0` to ask only every fifteen minutes.
+Set `pollSeconds` on the widget in `shell.json` to change the background
+interval, or to `0` to leave only the quarter-hour pass. Opening the panel
+always asks, whatever it is set to.
 
 ## Configuration
 
