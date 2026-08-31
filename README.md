@@ -100,12 +100,17 @@ Calendars**, or on a Mac in Calendar under **File → Get Info**.
 | Scroll / `[` `]` | Previous and next month |
 | `{` `}` | Previous and next year |
 | `t` | Back to today |
-| `w` | Switch which day the week starts on |
+| Click the `W` heading | Start weeks on Monday, or on Sunday |
+| `w` | The same, from the keyboard |
 
 Clicking an event opens the half the list leaves out: when it ends, which
 calendar it came from, and whatever notes the invitation carried.
 
 ![An event opened](docs/event-detail.png)
+
+Weeks start wherever your system locale says they do until you say otherwise,
+which for an `en_US` locale means Sunday even in a country that does not.
+Clicking the `W` settles it for good.
 
 Renaming and recolouring are display choices, stored next to the widget in
 `shell.json`. A sync never overwrites them, and the calendar's original name
