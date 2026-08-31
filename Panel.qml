@@ -1529,52 +1529,6 @@ Panel {
                 wrapMode: Text.WordWrap
               }
 
-              // Only while both clocks are on the bar; taking the offer is
-              // what makes it go away.
-              Item {
-                width: parent.width
-                visible: root.builtinClockOnBar
-                height: visible ? Math.max(hideClockAction.implicitHeight, Style.space(12)) : 0
-
-                Text {
-                  anchors.left: parent.left
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: parent.width - hideClockAction.width - Style.space(10)
-                  elide: Text.ElideRight
-                  text: "Omarchy's own clock is on the bar too"
-                  color: Qt.darker(root.contentForeground, 1.9)
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.caption
-                }
-
-                Text {
-                  id: hideClockAction
-                  anchors.right: parent.right
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: "Hide it"
-                  color: hideClockMouse.containsMouse
-                    ? Style.hoverStateColor(root.contentForeground, Color.accent)
-                    : Qt.darker(root.contentForeground, 1.4)
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.caption
-
-                  MouseArea {
-                    id: hideClockMouse
-                    anchors.fill: parent
-                    anchors.margins: -Style.space(5)
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.hideBuiltinClock()
-                  }
-
-                  PanelToolTip {
-                    visible: hideClockMouse.containsMouse
-                    text: "Take it off the bar — it stays installed"
-                    fontFamily: root.contentFontFamily
-                  }
-                }
-              }
-
               // ---- Calendars, doubling as the legend and the switches.
               //      A single calendar has nothing to toggle between, so the
               //      row only earns its space once there are two.
@@ -1872,6 +1826,69 @@ Panel {
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
                   wrapMode: Text.WordWrap
+                }
+              }
+
+              // Only while both clocks are on the bar; taking the offer is
+              // what makes it go away. It sits at the very foot of the panel
+              // with a surface of its own — a one-time piece of setup should
+              // be findable at a glance, and then gone for good.
+              Rectangle {
+                width: parent.width
+                visible: root.builtinClockOnBar
+                height: visible ? hideClockRow.implicitHeight + Style.space(18) : 0
+                radius: Style.cornerRadius
+                color: hideClockMouse.containsMouse
+                  ? Style.hoverFillFor(root.contentForeground, Color.accent)
+                  : Style.normalFillFor(root.contentForeground, Color.accent)
+
+                Item {
+                  id: hideClockRow
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  anchors.leftMargin: Style.space(11)
+                  anchors.rightMargin: Style.space(11)
+                  implicitHeight: Math.max(hideClockLabel.implicitHeight, hideClockAction.implicitHeight)
+
+                  Text {
+                    id: hideClockLabel
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - hideClockAction.width - Style.space(12)
+                    elide: Text.ElideRight
+                    text: "Omarchy's own clock is on the bar too"
+                    color: Qt.darker(root.contentForeground, 1.2)
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.bodySmall
+                  }
+
+                  Text {
+                    id: hideClockAction
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Hide it"
+                    color: Style.selectedStateColor(root.contentForeground, Color.accent)
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.bold: true
+                  }
+                }
+
+                // The whole strip takes the click, not just the two words:
+                // a one-time action deserves a target you cannot miss.
+                MouseArea {
+                  id: hideClockMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.hideBuiltinClock()
+                }
+
+                PanelToolTip {
+                  visible: hideClockMouse.containsMouse
+                  text: "Take it off the bar — it stays installed"
+                  fontFamily: root.contentFontFamily
                 }
               }
             }
