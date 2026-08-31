@@ -438,6 +438,14 @@ Panel {
     return false
   }
 
+  // Standing in for the stock clock rather than just deleting it.
+  //
+  // Deleting left a hole and closed it up, so whatever sat to the clock's
+  // right slid over to this widget's left — the keyboard layout ending up on
+  // the wrong side of the calendar. Taking the clock's exact slot instead
+  // leaves the bar looking precisely as it did before, with this widget
+  // where that one was.
+  //
   // Off the bar, not uninstalled: the plugin stays enabled, so
   // `omarchy bar put omarchy.clock --section center` brings it straight back.
   function hideBuiltinClock() {
@@ -449,14 +457,38 @@ Panel {
 
     var next = JSON.parse(JSON.stringify(config))
     var sections = ["left", "center", "right"]
+
+    // This widget's own entry, settings and all — the move must not cost it
+    // its colours, names or label format.
+    var mine = null
+    for (var a = 0; a < sections.length; a++) {
+      var source = next.bar.layout[sections[a]]
+      if (!(source instanceof Array)) continue
+      for (var b = 0; b < source.length; b++)
+        if (source[b] && String(source[b].id) === root.moduleName) mine = source[b]
+    }
+    if (!mine) return
+
+    var placed = false
     for (var s = 0; s < sections.length; s++) {
       var list = next.bar.layout[sections[s]]
       if (!(list instanceof Array)) continue
       var kept = []
-      for (var i = 0; i < list.length; i++)
-        if (!list[i] || String(list[i].id) !== "omarchy.clock") kept.push(list[i])
+      for (var i = 0; i < list.length; i++) {
+        var entry = list[i]
+        var id = entry ? String(entry.id) : ""
+        if (id === "omarchy.clock" && !placed) {
+          kept.push(mine)
+          placed = true
+        } else if (id !== root.moduleName && id !== "omarchy.clock") {
+          kept.push(entry)
+        }
+        // This widget's old position is dropped; it reappears in the slot above.
+      }
       next.bar.layout[sections[s]] = kept
     }
+    // Nothing to stand in for means nothing to rearrange.
+    if (!placed) return
     shell.persistShellConfig(next)
   }
 
