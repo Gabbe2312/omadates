@@ -93,8 +93,11 @@ Panel {
   // outlives a restart. Hiding is a display choice only; the events stay in
   // the cache, so switching one back on is instant.
   readonly property var hiddenCalendars: setting("hiddenCalendars", [])
-  readonly property var calendars: Events.calendarsIn(cache.events)
-  readonly property var sourceColors: Events.colorMap(cache.events)
+  // From the server's own list, not inferred from the events in them, so a
+  // calendar made a moment ago is here with its colour before anything has
+  // been put in it.
+  readonly property var calendars: Events.calendarList(cache.calendars, cache.events)
+  readonly property var sourceColors: Events.colourIndex(cache.calendars)
 
   // Hand-picked colours, by calendar name. A display choice like hiding, so
   // it lives in shell.json next to it rather than in the sync config.
@@ -112,7 +115,7 @@ Panel {
   // ---- Composing. Only calendars the account owns can take a new event: a
   //      subscribed feed is read-only, and a reminder list holds a different
   //      kind of thing entirely.
-  readonly property var writableCalendars: cache.writable
+  readonly property var writableCalendars: Events.writableNames(cache.calendars)
   property bool composing: false
   property bool creating: false
   property string composeError: ""
@@ -462,7 +465,7 @@ Panel {
       root.closeCalendarEditor()
       return
     }
-    root.addingSubscription = false
+    root.addMode = ""
     root.calendarEditing = key
     Qt.callLater(function() {
       nameField.text = root.displayName(key)
@@ -2516,7 +2519,7 @@ Panel {
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                         onClicked: function(mouse) {
                           if (mouse.button === Qt.RightButton) {
-                            root.addingSubscription = false
+                            root.addMode = ""
                             // Right-clicking the open one puts the swatches away.
                             root.startEditingCalendar(chip.modelData.name)
                           } else {

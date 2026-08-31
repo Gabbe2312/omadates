@@ -332,7 +332,7 @@ def write_cache(payload):
 # kept — a dropped connection should not blank the calendar — but the calendar
 # lists were not, and the panel decides from those whether an event can be
 # added at all. One flaky sync took the "New event" action away with it.
-CARRIED_FORWARD = ("events", "syncedAt", "availableCalendars", "writableCalendars")
+CARRIED_FORWARD = ("events", "syncedAt", "calendars")
 
 
 def last_good():
@@ -1056,11 +1056,12 @@ def cmd_sync():
     end = now + timedelta(days=int(config["daysAhead"]))
     wanted = [str(n) for n in (config.get("calendars") or [])]
 
-    events, seen, problems = [], [], []
-    # Named separately because the panel has to know where an event may be
-    # written. A subscribed feed is read-only by nature, and a calendar with
-    # nothing in it is still a place to put something.
-    writable = []
+    events, problems = [], []
+    # The calendars in their own right, not inferred from the events in them.
+    # A calendar you just made has nothing in it yet and would otherwise be
+    # invisible here, and its colour would be unknown until something was put
+    # in it, which is a strange way to learn what colour it is.
+    calendars_meta = []
 
     if username:
         import caldav
@@ -1074,13 +1075,15 @@ def cmd_sync():
 
         for calendar in calendars:
             name = calendar_name(calendar, "Calendar")
-            seen.append(name)
-            if takes_events(calendar):
-                writable.append(name)
+            colour = calendar_color(calendar)
+            calendars_meta.append({
+                "name": name, "color": colour,
+                "writable": takes_events(calendar), "subscribed": False,
+            })
             if wanted and name not in wanted:
                 continue
             try:
-                events.extend(collect_caldav(calendar, start, end, tz, name, calendar_color(calendar)))
+                events.extend(collect_caldav(calendar, start, end, tz, name, colour))
             except Exception as exc:
                 problems.append(f"{name}: {friendly_error(exc)}")
 
@@ -1091,7 +1094,11 @@ def cmd_sync():
             fetched, name = fetch_subscription(entry, start, end, tz)
             events.extend(fetched)
             if name:
-                seen.append(name)
+                calendars_meta.append({
+                    "name": name,
+                    "color": fetched[0]["color"] if fetched else "",
+                    "writable": False, "subscribed": True,
+                })
         except Exception as exc:
             problems.append(f"{label}: {friendly_error(exc)}")
 
@@ -1107,11 +1114,10 @@ def cmd_sync():
         "error": "; ".join(problems),
         "checkedAt": datetime.now(timezone.utc).isoformat(),
         "syncedAt": datetime.now(timezone.utc).isoformat(),
-        "availableCalendars": seen,
-        "writableCalendars": writable,
+        "calendars": calendars_meta,
         "events": events,
     })
-    print(f"omadates-sync: {len(events)} events from {len(seen)} calendars")
+    print(f"omadates-sync: {len(events)} events from {len(calendars_meta)} calendars")
     return 0
 
 

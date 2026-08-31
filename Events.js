@@ -36,7 +36,7 @@ function parseCache(text) {
     // The helper states these on every write so the panel can tell "never
     // signed in" from "packages missing" from "the network is down", and each
     // has a different next step for whoever is looking at it.
-    configured: false, signedIn: false, missing: [], writable: []
+    configured: false, signedIn: false, missing: [], calendars: []
   }
   var raw = String(text || "").replace(/^\s+|\s+$/g, "")
   if (raw === "") return empty
@@ -62,7 +62,7 @@ function parseCache(text) {
     error: String(parsed.error || ""),
     syncedAt: String(parsed.syncedAt || ""),
     configured: parsed.configured === true,
-    writable: parsed.writableCalendars instanceof Array ? parsed.writableCalendars : [],
+    calendars: parsed.calendars instanceof Array ? parsed.calendars : [],
     signedIn: parsed.signedIn === true,
     missing: parsed.missing instanceof Array ? parsed.missing : [],
     events: events
@@ -145,16 +145,6 @@ function marksByDay(events) {
     }
   }
   return marks
-}
-
-// calendar name -> the colour its source gave it, before any override.
-function colorMap(events) {
-  var colors = {}
-  for (var i = 0; i < (events || []).length; i++) {
-    var name = String(events[i].calendar || "")
-    if (name !== "" && colors[name] === undefined) colors[name] = events[i].color || ""
-  }
-  return colors
 }
 
 // The dots to draw for one day: one per event, capped, because past three a
@@ -253,19 +243,42 @@ function legibleColor(hex, foregroundIsLight) {
   return String(hex)
 }
 
-// The calendars present in the cache, for the toggle row under the list.
-// Built from every cached event rather than the visible ones, or switching a
-// calendar off would take its own switch away with it.
-function calendarsIn(events) {
-  var seen = {}
+// The calendars as the sync reported them, sorted for a stable row. Built
+// from the server's own list rather than from the events in them: a calendar
+// you just made has nothing in it yet, and would otherwise not exist here.
+function calendarList(calendars, events) {
+  var carries = {}
+  for (var e = 0; e < (events || []).length; e++)
+    carries[String(events[e].calendar || "")] = true
+
   var out = []
-  for (var i = 0; i < (events || []).length; i++) {
-    var name = String(events[i].calendar || "")
-    if (name === "" || seen[name]) continue
-    seen[name] = true
-    out.push({ name: name, color: events[i].color || "" })
+  for (var i = 0; i < (calendars || []).length; i++) {
+    var entry = calendars[i]
+    // One you can put something in, or one that has something in it. An
+    // account's reminder list is neither: it holds a different kind of thing,
+    // and a switch for it would turn nothing on or off.
+    if (entry.writable === true || carries[String(entry.name || "")]) out.push(entry)
   }
-  out.sort(function(a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0) })
+  out.sort(function(a, b) {
+    var x = String(a.name || ""), y = String(b.name || "")
+    return x < y ? -1 : (x > y ? 1 : 0)
+  })
+  return out
+}
+
+// name -> the colour its source gave it, before any override.
+function colourIndex(calendars) {
+  var index = {}
+  for (var i = 0; i < (calendars || []).length; i++)
+    index[String(calendars[i].name || "")] = calendars[i].color || ""
+  return index
+}
+
+// Only the ones an event can actually be written to.
+function writableNames(calendars) {
+  var out = []
+  for (var i = 0; i < (calendars || []).length; i++)
+    if (calendars[i].writable === true) out.push(String(calendars[i].name || ""))
   return out
 }
 
