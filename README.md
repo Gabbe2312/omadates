@@ -48,7 +48,7 @@ a two-factor code, so this is the supported way in. It is revocable on its
 own and useless anywhere else.
 
 1. Open **account.apple.com** and sign in
-2. **Sign-In and Security → App-Specific Passwords**
+2. Go to **App-Specific Passwords**
 3. Add one, name it *Omarchy*, and copy the code
 
 Then open the clock in the bar and enter your Apple ID and that code. The

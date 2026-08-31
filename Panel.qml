@@ -1542,7 +1542,7 @@ Panel {
 
                     Text {
                       width: parent.width
-                      text: "2.  Sign-In and Security → App-Specific Passwords"
+                      text: "2.  Go to App-Specific Passwords"
                       color: root.contentForeground
                       font.family: root.contentFontFamily
                       font.pixelSize: Style.font.caption
