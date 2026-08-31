@@ -37,6 +37,19 @@ the pin over on first load when it finds it that way. It leaves an anchor
 that still resolves alone, and never claims a blank one, since blank means
 "centre the whole row" on purpose.
 
+## Updating
+
+```bash
+omarchy plugin update io.github.gabbe2312.calendar --yes
+omarchy restart shell
+```
+
+Omarchy shows you the incoming diff and asks before it installs anything,
+which is worth reading at least once; `--yes` skips that. The restart is the
+part that is easy to miss: the update reloads the plugin registry but not QML
+already loaded into the running shell, so without it the old panel stays on
+screen and the update looks like it did nothing.
+
 ## Signing in
 
 Optional. A subscribed feed works on its own, so if all you want is a
