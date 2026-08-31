@@ -90,6 +90,7 @@ Calendars**, or on a Mac in Calendar under **File → Get Info**.
 |---|---|
 | Click a day | Show that day's events |
 | Click an event | Open its details |
+| Click the address in an open event | Open it in maps |
 | Click a calendar | Hide or show it |
 | Right-click a calendar | Rename it, or pick its colour |
 | Right-click the year bar | Put the year meter away; the hairline it leaves behind brings it back |
@@ -140,7 +141,12 @@ bin/omadates-sync            # refresh now
 bin/omadates-sync check      # report missing packages
 bin/omadates-sync subscribe <url>
 bin/omadates-sync logout
+bin/omadates-sync map "Pilestredet 32, Oslo"
 ```
+
+The map opens through your registered `geo:` handler, so it lands in whichever
+map you have chosen; Omarchy ships handlers for Google Maps, OpenStreetMap and
+Wheelmap. A system with none falls back to a web search.
 
 ## Removing it
 

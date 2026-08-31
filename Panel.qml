@@ -425,6 +425,15 @@ Panel {
     Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
   }
 
+  // The helper picks the map: a registered geo: handler is the system's own
+  // choice, and only a machine with none falls back to the web.
+  function openMap(location) {
+    var place = String(location || "").replace(/^\s+|\s+$/g, "")
+    if (place === "") return
+    mapProcess.command = root.syncCommand.concat(["map", place])
+    mapProcess.running = true
+  }
+
   function toggleEventDetail(event) {
     var key = Events.eventKey(event)
     root.expandedEvent = root.expandedEvent === key ? "" : key
@@ -637,6 +646,10 @@ Panel {
 
   Process {
     id: appleLinkProcess
+  }
+
+  Process {
+    id: mapProcess
   }
 
   Process {
@@ -1384,6 +1397,17 @@ Panel {
                         : "transparent")
                   }
 
+                  // Behind the content rather than over it: plain text does
+                  // not consume clicks, so the row still toggles wherever you
+                  // press it, while the address above can claim its own.
+                  MouseArea {
+                    id: eventMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.toggleEventDetail(eventRow.modelData)
+                  }
+
                   Text {
                     id: eventTime
                     anchors.left: parent.left
@@ -1443,14 +1467,36 @@ Panel {
                     }
 
                     Text {
+                      id: eventLocation
                       width: parent.width
                       visible: eventRow.modelData.location !== ""
                       text: eventRow.modelData.location
-                      color: Qt.darker(root.contentForeground, 1.8)
+                      // Underlined only once the row is open, so a closed
+                      // list stays quiet and the affordance appears exactly
+                      // where it can be used.
+                      color: (eventRow.expanded && locationMouse.containsMouse)
+                        ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                        : Qt.darker(root.contentForeground, 1.8)
                       font.family: root.contentFontFamily
                       font.pixelSize: Style.font.caption
+                      font.underline: eventRow.expanded && locationMouse.containsMouse
                       elide: eventRow.expanded ? Text.ElideNone : Text.ElideRight
                       wrapMode: eventRow.expanded ? Text.WordWrap : Text.NoWrap
+
+                      MouseArea {
+                        id: locationMouse
+                        anchors.fill: parent
+                        enabled: eventRow.expanded
+                        hoverEnabled: enabled
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.openMap(eventRow.modelData.location)
+                      }
+
+                      PanelToolTip {
+                        visible: locationMouse.containsMouse
+                        text: "Open in maps"
+                        fontFamily: root.contentFontFamily
+                      }
                     }
 
                     // ---- The half the list leaves out. The row shows when
@@ -1497,13 +1543,6 @@ Panel {
                     }
                   }
 
-                  MouseArea {
-                    id: eventMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.toggleEventDetail(eventRow.modelData)
-                  }
                 }
               }
 

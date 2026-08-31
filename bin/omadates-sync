@@ -9,6 +9,7 @@ Subcommands (the panel drives all of these; they also work by hand):
     sync                  Refresh the cache. The default.
     login <apple-id>      Store a password read from stdin, then sync.
     logout                Forget the account and its password.
+    map <location>        Open a location in the system's map handler.
     subscribe <url>       Add a webcal:// or https://….ics feed, then sync.
     unsubscribe <url>     Drop a feed, then sync.
     check                 Report missing dependencies as JSON. Never fails.
@@ -337,6 +338,45 @@ def shutil_which(name):
     return shutil.which(name)
 
 
+def cmd_map(args):
+    """Open a location in whatever this system uses for maps.
+
+    A registered geo: handler is the machine's own answer to "show me this
+    place", which is the one worth honouring: Omarchy ships handlers for
+    Google Maps, OpenStreetMap and Wheelmap, and which one runs is the user's
+    choice, not this plugin's. The web search is only for systems where
+    nothing has claimed the scheme.
+    """
+    import shutil
+    import urllib.parse
+
+    query = " ".join(args).strip()
+    if not query:
+        print("omadates-sync: map needs a location", file=sys.stderr)
+        return 2
+    if not shutil.which("xdg-open"):
+        print("omadates-sync: xdg-open is not installed", file=sys.stderr)
+        return 1
+
+    encoded = urllib.parse.quote(query)
+    target = "https://www.google.com/maps/search/?api=1&query=" + encoded
+    if shutil.which("xdg-mime"):
+        try:
+            handler = subprocess.run(
+                ["xdg-mime", "query", "default", "x-scheme-handler/geo"],
+                capture_output=True, text=True, timeout=5).stdout.strip()
+            if handler:
+                target = "geo:0,0?q=" + encoded
+        except Exception:
+            pass
+
+    # Detached, so closing the panel or the shell never takes the map with it.
+    subprocess.Popen(["xdg-open", target], start_new_session=True,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print("omadates-sync: opened " + target)
+    return 0
+
+
 def cmd_check():
     missing = missing_dependencies()
     print(json.dumps({"ok": not missing, "missing": missing}))
@@ -544,6 +584,8 @@ def main(argv):
         return 0
     if command == "check":
         return cmd_check()
+    if command == "map":
+        return cmd_map(rest)
     if command == "login":
         return cmd_login(rest)
     if command == "logout":
