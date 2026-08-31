@@ -119,6 +119,21 @@ Panel {
   property bool showSignIn: false
   readonly property bool signInVisible: (!root.configured || root.showSignIn)
     && root.missingPackages.length === 0
+
+  // Focus follows the form rather than being asked for at each call site.
+  // Signing out while the panel is open put the form on screen with nothing
+  // focused, so typing went nowhere: the panel invites you to type by
+  // focusing the field when it opens, then quietly stops honouring that.
+  onSignInVisibleChanged: {
+    if (!root.opened) return
+    Qt.callLater(function() {
+      if (!root.opened) return
+      // And handed back when the form goes away, or the month keys would
+      // stay dead on a field nobody can see any more.
+      if (root.signInVisible) appleIdField.forceActiveFocus()
+      else if (keyCatcher) keyCatcher.forceActiveFocus()
+    })
+  }
   readonly property var missingPackages: cache.missing instanceof Array ? cache.missing : []
 
   // Which calendar's swatches are open, and whether the URL field is up.
@@ -1379,7 +1394,6 @@ Panel {
                     Text {
                       width: parent.width
                       visible: eventRow.modelData.location !== ""
-                      height: visible ? implicitHeight : 0
                       text: eventRow.modelData.location
                       color: Qt.darker(root.contentForeground, 1.8)
                       font.family: root.contentFontFamily
@@ -1395,7 +1409,6 @@ Panel {
                     Column {
                       width: parent.width
                       visible: eventRow.expanded
-                      height: visible ? implicitHeight : 0
                       topPadding: visible ? Style.space(4) : 0
                       spacing: Style.space(2)
 
@@ -1423,7 +1436,6 @@ Panel {
                       Text {
                         width: parent.width
                         visible: eventRow.modelData.description !== ""
-                        height: visible ? implicitHeight : 0
                         topPadding: visible ? Style.space(3) : 0
                         text: eventRow.modelData.description
                         color: Qt.darker(root.contentForeground, 1.8)
@@ -1453,7 +1465,6 @@ Panel {
               Column {
                 width: parent.width
                 visible: root.missingPackages.length > 0
-                height: visible ? implicitHeight : 0
                 spacing: Style.space(3)
 
                 Text {
@@ -1482,7 +1493,6 @@ Panel {
               Column {
                 width: parent.width
                 visible: root.signInVisible
-                height: visible ? implicitHeight : 0
                 spacing: Style.space(5)
 
                 // Above the fields, not below them: you need the password in
@@ -1666,7 +1676,6 @@ Panel {
               Text {
                 visible: !root.signInVisible && root.missingPackages.length === 0
                   && root.selectedEvents.length === 0
-                height: visible ? implicitHeight : 0
                 width: parent.width
                 text: root.statusMessage
                 color: Qt.darker(root.contentForeground, root.cacheFailed ? 1.3 : 1.9)
@@ -1803,7 +1812,6 @@ Panel {
 
                 Item {
                   visible: root.configured && !root.signedIn
-                  width: visible ? signInChip.width : 0
                   height: root.calendarRowHeight
 
                   Text {
@@ -1826,7 +1834,6 @@ Panel {
                     onClicked: {
                       root.showSignIn = !root.showSignIn
                       root.signInError = ""
-                      if (root.showSignIn) Qt.callLater(function() { appleIdField.forceActiveFocus() })
                     }
                   }
 
@@ -1839,7 +1846,6 @@ Panel {
 
                 Item {
                   visible: root.signedIn
-                  width: visible ? signOutLabel.width : 0
                   height: root.calendarRowHeight
 
                   Text {
@@ -1870,7 +1876,6 @@ Panel {
               Column {
                 width: parent.width
                 visible: root.calendarEditing !== ""
-                height: visible ? implicitHeight : 0
                 spacing: Style.space(5)
 
                 // A feed that supplied no name of its own arrives as a
@@ -1982,7 +1987,6 @@ Panel {
               Column {
                 width: parent.width
                 visible: root.addingSubscription
-                height: visible ? implicitHeight : 0
                 spacing: Style.space(4)
 
                 TextField {
@@ -2026,7 +2030,7 @@ Panel {
               Rectangle {
                 width: parent.width
                 visible: root.builtinClockOnBar
-                height: visible ? hideClockRow.implicitHeight + Style.space(18) : 0
+                height: hideClockRow.implicitHeight + Style.space(18)
                 radius: Style.cornerRadius
                 color: hideClockMouse.containsMouse
                   ? Style.hoverFillFor(root.contentForeground, Color.accent)
