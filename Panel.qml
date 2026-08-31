@@ -411,6 +411,11 @@ Panel {
     root.signInError = ""
     root.pendingPassword = secret
     root.signingIn = true
+    // Re-armed every time. Closing stdin in onStarted is what lets the
+    // helper's read() return, but the assignment breaks the declarative
+    // binding: the next run survives on what is left of it and every run
+    // after that gets no stdin at all.
+    loginProcess.stdinEnabled = true
     loginProcess.command = root.syncCommand.concat(["login", user])
     loginProcess.running = true
   }
@@ -516,6 +521,7 @@ Panel {
     root.composeError = ""
     root.creating = true
     root.pendingPayload = JSON.stringify(payload)
+    createProcess.stdinEnabled = true
     createProcess.command = root.syncCommand.concat(["create"])
     createProcess.running = true
   }
@@ -567,6 +573,7 @@ Panel {
       start: Model.keyForDate(new Date(event.startMs)) + "T"
         + Events.timeLabel(event, "").replace("All day", "00:00")
     })
+    deleteProcess.stdinEnabled = true
     deleteProcess.command = root.syncCommand.concat(["delete"])
     deleteProcess.running = true
   }
