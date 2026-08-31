@@ -31,6 +31,14 @@ clock rather than beside it, switch that one off:
 omarchy plugin disable omarchy.clock
 ```
 
+Omarchy pins one centre widget in place and hangs the rest off its edges, so
+things that appear on hover grow outward instead of shoving the clock
+sideways. That pin — `bar.centerAnchor` in `shell.json` — ships pointing at
+the stock clock, and switching it off leaves it dangling. This plugin takes
+the pin over on first load when it finds it that way. It leaves an anchor
+that still resolves alone, and never claims a blank one, since blank means
+"centre the whole row" on purpose.
+
 ## Signing in
 
 Open the clock in the bar and fill in the two fields.

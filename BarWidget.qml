@@ -73,6 +73,45 @@ BarWidget {
     if (panelLoader.item) panelLoader.item.toggle()
   }
 
+  // ---- Taking over the bar's centre anchor when it points at nothing.
+  //
+  // With a valid anchor the bar pins that one widget to the middle and hangs
+  // everything else off its edges, so an indicator revealing on hover grows
+  // leftward and the clock holds still. With no valid anchor it centres the
+  // whole row as one block, and every reveal shoves the clock sideways —
+  // right as you are reaching for it.
+  //
+  // Omarchy ships the anchor naming its own clock. Switch that clock off in
+  // favour of this one and the anchor is left dangling, which is the broken
+  // state this repairs. It never touches an anchor that resolves, and never
+  // claims an empty one: blank is a deliberate "centre the row as a block".
+  function adoptDanglingCenterAnchor() {
+    if (!root.bar || !root.bar.shell) return
+    var shell = root.bar.shell
+    if (typeof shell.persistShellConfig !== "function") return
+
+    var config = shell.shellConfig
+    if (!config || !config.bar || !config.bar.layout) return
+    var center = config.bar.layout.center
+    if (!(center instanceof Array)) return
+
+    var anchor = String(config.bar.centerAnchor || "")
+    if (anchor === "" || anchor === root.moduleName) return
+
+    var anchorPresent = false
+    var selfPresent = false
+    for (var i = 0; i < center.length; i++) {
+      var id = center[i] ? String(center[i].id) : ""
+      if (id === anchor) anchorPresent = true
+      if (id === root.moduleName) selfPresent = true
+    }
+    if (anchorPresent || !selfPresent) return
+
+    var next = JSON.parse(JSON.stringify(config))
+    next.bar.centerAnchor = root.moduleName
+    shell.persistShellConfig(next)
+  }
+
   function toggleWeekStart() {
     if (panelLoader.item) panelLoader.item.toggleWeekStart()
   }
@@ -110,7 +149,10 @@ BarWidget {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  onBarChanged: injectPanel()
+  onBarChanged: {
+    injectPanel()
+    Qt.callLater(root.adoptDanglingCenterAnchor)
+  }
   onSettingsChanged: injectPanel()
 
   SystemClock {
