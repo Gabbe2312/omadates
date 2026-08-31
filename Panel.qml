@@ -194,6 +194,10 @@ Panel {
     // cleared rather than stuck on.
     Qt.callLater(function() {
       if (root.opened) setCenterHoverRevealSuppressed(true)
+      // A panel that opens by asking for credentials should be ready to take
+      // them, rather than making the first act a click into a field.
+      if (root.opened && !root.configured && root.missingPackages.length === 0)
+        appleIdField.forceActiveFocus()
     })
   }
 
@@ -505,7 +509,10 @@ Panel {
         passwordField.text = ""
         Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
       } else {
-        root.signInError = "Sign-in failed — check the Apple ID and the app-specific password"
+        // Short enough to sit beside the button without being elided; the
+        // line underneath already says where an app-specific password
+        // comes from, so it does not need repeating here.
+        root.signInError = "Sign-in failed — check both fields"
       }
       calendarCache.reload()
     }
@@ -1372,7 +1379,9 @@ Panel {
                   color: Qt.darker(root.contentForeground, 1.8)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
-                  wrapMode: Text.WrapAnywhere
+                  // Break between package names, not inside them — a command
+                  // meant to be read and retyped must not split a word.
+                  wrapMode: Text.Wrap
                 }
               }
 
