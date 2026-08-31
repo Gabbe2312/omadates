@@ -12,7 +12,7 @@ Works with **iCloud**, any **CalDAV** server (Fastmail, Nextcloud, Radicale),
 and **webcal subscriptions** — the holiday and timetable feeds your phone
 carries but iCloud never stores.
 
-![Screenshot](preview.png)
+![The calendar popup](preview.png)
 
 ## Install
 
@@ -40,6 +40,8 @@ that still resolves alone, and never claims a blank one, since blank means
 ## Signing in
 
 Open the clock in the bar and fill in the two fields.
+
+![Signing in](docs/sign-in.png)
 
 You need an **app-specific password**, not your normal Apple password. Apple
 offers no browser sign-in for calendar access, and CalDAV has nowhere to type
@@ -73,6 +75,11 @@ Calendars**, or on a Mac in Calendar under **File → Get Info**.
 | `{` `}` | Previous and next year |
 | `t` | Back to today |
 | `w` | Switch which day the week starts on |
+
+Clicking an event opens the half the list leaves out — when it ends, which
+calendar it came from, and whatever notes the invitation carried.
+
+![An event opened](docs/event-detail.png)
 
 Renaming and recolouring are display choices, stored next to the widget in
 `shell.json`. A sync never overwrites them, and the calendar's original name
