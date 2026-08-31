@@ -343,6 +343,25 @@ def cmd_check():
     return 0
 
 
+def friendly_error(exc):
+    detail = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
+    if any(k in detail for k in ("401", "Unauthorized", "Forbidden")):
+        return ("the server rejected the sign-in — check the Apple ID, and note that "
+                "this needs an app-specific password, not your usual one")
+    return detail
+
+
+def verify_credentials(url, username, password):
+    """Prove the credentials work before they are written anywhere.
+
+    Storing first and checking afterwards means one typo on a re-authentication
+    replaces a working password with a broken one, and the only symptom is a
+    calendar that quietly stops updating.
+    """
+    import caldav
+    caldav.DAVClient(url=url, username=username, password=password).principal().calendars()
+
+
 def cmd_login(args):
     if not args:
         return fail("login needs an Apple ID")
@@ -354,12 +373,17 @@ def cmd_login(args):
     if not password:
         return fail("no password given")
 
+    config = load_config()
+    try:
+        verify_credentials(str(config["url"]), username, password)
+    except Exception as exc:
+        return fail(friendly_error(exc))
+
     try:
         keyring_store(username, password)
     except RuntimeError as exc:
         return fail(str(exc))
 
-    config = load_config()
     config["username"] = username
     save_config(config)
     return cmd_sync()
@@ -447,10 +471,7 @@ def cmd_sync():
             client = caldav.DAVClient(url=str(config["url"]), username=username, password=password)
             calendars = client.principal().calendars()
         except Exception as exc:
-            detail = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
-            if "401" in detail or "Unauthorized" in detail or "Forbidden" in detail:
-                detail = "the server rejected the sign-in — the app-specific password may have been revoked"
-            return fail(detail)
+            return fail(friendly_error(exc))
 
         for calendar in calendars:
             name = calendar_name(calendar, "Calendar")

@@ -24,11 +24,11 @@ omarchy plugin add https://github.com/Gabbe2312/omarchy-icalendar.git --enable
 The packages are separate because a plugin cannot install system packages for
 you. If you skip them, the panel tells you exactly which line to run.
 
-Then replace the stock clock with this one:
+`--enable` puts it in the centre of the bar. To use it *instead of* the stock
+clock rather than beside it, switch that one off:
 
 ```bash
-omarchy bar remove omarchy.clock
-omarchy bar move io.github.gabbe2312.calendar --section center
+omarchy plugin disable omarchy.clock
 ```
 
 ## Signing in
