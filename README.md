@@ -92,6 +92,7 @@ Calendars**, or on a Mac in Calendar under **File → Get Info**.
 | Click an event | Open its details |
 | Click the address in an open event | Open it in maps |
 | `+ New event` | Add one to the day you are looking at |
+| `Delete` in an open event | Remove it; press twice to confirm |
 | Click a calendar | Hide or show it |
 | Right-click a calendar | Rename it, or pick its colour |
 | Right-click the year bar | Put the year meter away; the hairline it leaves behind brings it back |
@@ -129,6 +130,10 @@ appears in the picker.
 
 It goes straight to the server, which means it reaches your phone the same way
 an event made on a Mac does.
+
+Open an event and `Delete` removes it, on a second press rather than a first.
+A repeating event says `Delete every one?` instead, because a series shares
+one identifier and there is no way to take less than all of it from here.
 
 ## How it syncs
 

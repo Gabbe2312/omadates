@@ -10,6 +10,7 @@ Subcommands (the panel drives all of these; they also work by hand):
     login <apple-id>      Store a password read from stdin, then sync.
     logout                Forget the account and its password.
     create                Write one event, read as JSON on stdin.
+    delete                Remove one event, read as JSON on stdin.
     map <location>        Open a location in the system's map handler.
     subscribe <url>       Add a webcal:// or https://….ics feed, then sync.
     unsubscribe <url>     Drop a feed, then sync.
@@ -240,6 +241,10 @@ def build_event(sub, tz, name, color, subscribed):
 
     return {
         "uid": str(sub.get("UID", "") or ""),
+        # A repeating event shares one UID across every occurrence, so
+        # deleting by UID takes the whole series. The panel has to be able
+        # to say so before it asks.
+        "recurring": bool(sub.get("RRULE") or sub.get("RECURRENCE-ID")),
         "summary": str(sub.get("SUMMARY", "") or "").strip() or "(no title)",
         "description": clean_description(sub.get("DESCRIPTION")),
         "location": str(sub.get("LOCATION", "") or "").strip(),
@@ -461,6 +466,88 @@ def cmd_create(args):
     return cmd_sync()
 
 
+def cmd_delete(args):
+    """Remove one event by UID from a calendar the account owns.
+
+    A subscribed feed is somebody else's file, so nothing here can touch it.
+    Deleting by UID takes every occurrence of a repeating event, which is why
+    the panel says as much before it asks.
+    """
+    try:
+        payload = json.loads(sys.stdin.read() or "{}")
+    except Exception as exc:
+        print(f"omadates-sync: unreadable payload: {exc}", file=sys.stderr)
+        return 2
+
+    uid = str(payload.get("uid") or "").strip()
+    target = str(payload.get("calendar") or "").strip()
+    if not uid:
+        return fail("that event has no identifier to delete by")
+    if not target:
+        return fail("no calendar given")
+
+    config = load_config()
+    username = str(config.get("username") or "").strip()
+    if not username:
+        return fail("not signed in")
+
+    import caldav
+    try:
+        password = keyring_lookup(username)
+        client = caldav.DAVClient(url=str(config["url"]), username=username, password=password)
+        calendars = client.principal().calendars()
+    except Exception as exc:
+        return fail(friendly_error(exc))
+
+    for candidate in calendars:
+        if calendar_name(candidate, "") != target:
+            continue
+        if not takes_events(candidate):
+            return fail("that calendar does not hold events")
+        found = None
+        # iCloud answers the UID-based REPORT that event_by_uid issues with
+        # 412 Precondition Failed, so that is tried once and then set aside
+        # for a search over the days around the event. The panel knows when
+        # the event is, which keeps the window small.
+        try:
+            found = candidate.event_by_uid(uid)
+        except Exception:
+            found = None
+
+        if found is None:
+            tz = local_tz()
+            try:
+                around = parse_local(payload.get("start"), tz)
+            except ValueError:
+                around = datetime.now(tz)
+            try:
+                items = candidate.search(start=around - timedelta(days=2),
+                                         end=around + timedelta(days=2), event=True)
+            except Exception as exc:
+                return fail(friendly_error(exc))
+            for item in items:
+                try:
+                    components = item.icalendar_instance.walk("VEVENT")
+                except Exception:
+                    continue
+                if any(str(c.get("UID", "")) == uid for c in components):
+                    found = item
+                    break
+
+        if found is None:
+            return fail("that event is no longer on the server")
+        try:
+            found.delete()
+        except Exception as exc:
+            return fail(friendly_error(exc))
+        break
+    else:
+        return fail(f"no calendar named '{target}'")
+
+    print(f"omadates-sync: deleted {uid}")
+    return cmd_sync()
+
+
 def cmd_map(args):
     """Open a location in whatever this system uses for maps.
 
@@ -477,8 +564,17 @@ def cmd_map(args):
     if not query:
         print("omadates-sync: map needs a location", file=sys.stderr)
         return 2
-    if not shutil.which("xdg-open"):
-        print("omadates-sync: xdg-open is not installed", file=sys.stderr)
+    # gio first, xdg-open second. xdg-open exits 0 and does nothing at all
+    # for a geo: URI on a desktop it does not recognise, which is a silent
+    # failure and the worst kind; gio consults the same handler registry and
+    # actually launches it.
+    opener = shutil.which("gio")
+    launch = [opener, "open"] if opener else None
+    if launch is None:
+        opener = shutil.which("xdg-open")
+        launch = [opener] if opener else None
+    if launch is None:
+        print("omadates-sync: neither gio nor xdg-open is installed", file=sys.stderr)
         return 1
 
     encoded = urllib.parse.quote(query)
@@ -494,7 +590,7 @@ def cmd_map(args):
             pass
 
     # Detached, so closing the panel or the shell never takes the map with it.
-    subprocess.Popen(["xdg-open", target], start_new_session=True,
+    subprocess.Popen(launch + [target], start_new_session=True,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     print("omadates-sync: opened " + target)
     return 0
@@ -718,6 +814,8 @@ def main(argv):
         return cmd_map(rest)
     if command == "create":
         return cmd_create(rest)
+    if command == "delete":
+        return cmd_delete(rest)
     if command == "login":
         return cmd_login(rest)
     if command == "logout":

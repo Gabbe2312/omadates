@@ -178,7 +178,10 @@ Panel {
   // another one. The question a calendar answers by default is "what is on
   // today", and everything else is a deliberate click away.
   property string selectedKey: todayKey
-  onSelectedKeyChanged: root.expandedEvent = ""
+  onSelectedKeyChanged: {
+    root.expandedEvent = ""
+    root.deleteArmed = ""
+  }
   readonly property var selectedEvents: Events.eventsForDay(root.events, selectedKey)
   readonly property date selectedDate: Model.dateFromKey(selectedKey, today)
   readonly property bool selectedIsToday: selectedKey === todayKey
@@ -518,8 +521,42 @@ Panel {
 
   property string pendingPayload: ""
 
+  // Which event is one click from being removed. Armed by the first press
+  // and cleared by anything else, so nothing goes on a single stray click
+  // and nothing stays armed behind your back.
+  property string deleteArmed: ""
+  property bool deleting: false
+
+  function canDelete(event) {
+    if (!event) return false
+    if (event.subscribed === true) return false
+    if (String(event.uid || "") === "") return false
+    return root.writableCalendars.indexOf(String(event.calendar || "")) !== -1
+  }
+
+  function requestDelete(event) {
+    var key = Events.eventKey(event)
+    if (root.deleteArmed !== key) {
+      root.deleteArmed = key
+      return
+    }
+    root.deleteArmed = ""
+    root.deleting = true
+    // The start goes along so the helper can look in the right few days:
+    // iCloud refuses the UID query that would otherwise find it directly.
+    root.pendingPayload = JSON.stringify({
+      uid: String(event.uid),
+      calendar: String(event.calendar),
+      start: Model.keyForDate(new Date(event.startMs)) + "T"
+        + Events.timeLabel(event, "").replace("All day", "00:00")
+    })
+    deleteProcess.command = root.syncCommand.concat(["delete"])
+    deleteProcess.running = true
+  }
+
   function toggleEventDetail(event) {
     var key = Events.eventKey(event)
+    root.deleteArmed = ""
     root.expandedEvent = root.expandedEvent === key ? "" : key
   }
 
@@ -734,6 +771,21 @@ Panel {
 
   Process {
     id: mapProcess
+  }
+
+  Process {
+    id: deleteProcess
+    stdinEnabled: true
+    onStarted: {
+      write(root.pendingPayload)
+      stdinEnabled = false
+    }
+    onExited: function(exitCode) {
+      root.pendingPayload = ""
+      root.deleting = false
+      if (exitCode === 0) root.expandedEvent = ""
+      calendarCache.reload()
+    }
   }
 
   Process {
@@ -1626,13 +1678,63 @@ Panel {
                         font.pixelSize: Style.font.bodySmall
                       }
 
-                      Text {
+                      Item {
                         width: parent.width
-                        text: root.displayName(eventRow.modelData.calendar)
-                        color: eventRow.tint
-                        font.family: root.contentFontFamily
-                        font.pixelSize: Style.font.caption
-                        elide: Text.ElideRight
+                        height: Math.max(eventCalendarName.implicitHeight,
+                          deleteAction.implicitHeight)
+
+                        Text {
+                          id: eventCalendarName
+                          anchors.left: parent.left
+                          anchors.verticalCenter: parent.verticalCenter
+                          width: parent.width - deleteAction.width - Style.space(10)
+                          text: root.displayName(eventRow.modelData.calendar)
+                          color: eventRow.tint
+                          font.family: root.contentFontFamily
+                          font.pixelSize: Style.font.caption
+                          elide: Text.ElideRight
+                        }
+
+                        // Two presses, not one. The first says what the
+                        // second will do, and a repeating event says that it
+                        // takes the whole series with it, because deleting by
+                        // UID cannot take anything less.
+                        Text {
+                          id: deleteAction
+                          anchors.right: parent.right
+                          anchors.verticalCenter: parent.verticalCenter
+                          visible: root.canDelete(eventRow.modelData)
+                          text: root.deleting
+                            ? "Deleting…"
+                            : (root.deleteArmed === Events.eventKey(eventRow.modelData)
+                              ? (eventRow.modelData.recurring ? "Delete every one?" : "Delete?")
+                              : "Delete")
+                          color: (deleteMouse.containsMouse
+                            || root.deleteArmed === Events.eventKey(eventRow.modelData))
+                            ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                            : Qt.darker(root.contentForeground, 2.1)
+                          font.family: root.contentFontFamily
+                          font.pixelSize: Style.font.caption
+
+                          MouseArea {
+                            id: deleteMouse
+                            anchors.fill: parent
+                            anchors.margins: -Style.space(5)
+                            hoverEnabled: true
+                            enabled: !root.deleting
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.requestDelete(eventRow.modelData)
+                          }
+
+                          PanelToolTip {
+                            visible: deleteMouse.containsMouse
+                              && root.deleteArmed !== Events.eventKey(eventRow.modelData)
+                            text: eventRow.modelData.recurring
+                              ? "Remove this event and every repeat of it"
+                              : "Remove this event from the calendar"
+                            fontFamily: root.contentFontFamily
+                          }
+                        }
                       }
 
                       Text {

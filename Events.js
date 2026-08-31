@@ -83,6 +83,8 @@ function normalize(entry) {
     uid: String(entry.uid || ""),
     summary: String(entry.summary || "").replace(/^\s+|\s+$/g, "") || "(no title)",
     description: String(entry.description || "").replace(/^\s+|\s+$/g, ""),
+    recurring: entry.recurring === true,
+    subscribed: entry.subscribed === true,
     location: String(entry.location || "").replace(/^\s+|\s+$/g, ""),
     calendar: String(entry.calendar || ""),
     color: String(entry.color || ""),
