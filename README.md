@@ -142,8 +142,18 @@ The shell never touches the network. A helper writes
 and redraws. So the popup opens instantly, and it still shows the last good
 answer when you are offline.
 
-The helper runs every 15 minutes from inside the shell, and again when you
-open the panel if the cache has gone stale. No system timer to install.
+Every minute the shell asks the server whether anything changed. That question
+is answered by a sync token: an opaque string per calendar that changes when
+its contents do, so the server does the comparing and the answer costs a
+fifth of a second. Only when it comes back different is anything fetched. An
+event added on your phone lands here inside a minute.
+
+A full pass still runs every quarter of an hour, because subscribed feeds
+carry no such token and a plain sweep repairs anything the tokens missed. No
+system timer to install for either.
+
+Set `pollSeconds` on the widget in `shell.json` to change the interval, or to
+`0` to ask only every fifteen minutes.
 
 ## Configuration
 

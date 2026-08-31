@@ -292,17 +292,23 @@ Panel {
     root.nowMs = new Date().getTime()
     root.goToToday()
     calendarCache.reload()
-    root.requestSync()
+    root.requestPoll()
   }
 
   // A background sync, but only when the cache has actually gone stale.
   // Opening the panel repeatedly should not hammer iCloud, and the timer is
   // already covering the steady state.
   function requestSync() {
-    if (syncProcess.running) return
-    var syncedAt = Date.parse(String(root.cache.syncedAt || ""))
-    if (isFinite(syncedAt) && (new Date().getTime() - syncedAt) < 300000) return
+    if (syncProcess.running || pollProcess.running) return
     syncProcess.running = true
+  }
+
+  // Asking whether anything changed costs a fraction of fetching it, so it
+  // can be asked often. A change made on a phone lands here inside a minute
+  // rather than waiting out the quarter hour.
+  function requestPoll() {
+    if (syncProcess.running || pollProcess.running) return
+    pollProcess.running = true
   }
 
   function goToToday() {
@@ -854,16 +860,33 @@ Panel {
   }
 
   Process {
+    id: pollProcess
+    command: root.syncCommand.concat(["poll"])
+  }
+
+  Process {
     id: syncProcess
     command: root.syncCommand
     // Nothing to do on exit: the sync rewrites the cache, and the FileView
     // above is already watching it.
   }
 
+  // How often to ask. Zero stops the asking and leaves only the full sync
+  // below, for anyone who would rather not have the network touched every
+  // minute.
+  readonly property int pollSeconds: Math.max(0, Number(setting("pollSeconds", 60)) || 0)
+
   Timer {
-    // Fifteen minutes is roughly what a phone does, and opening the panel
-    // refreshes a stale cache anyway, so this only covers the case where
-    // nobody has looked at it in a while.
+    interval: Math.max(15, root.pollSeconds) * 1000
+    running: root.pollSeconds > 0
+    repeat: true
+    onTriggered: root.requestPoll()
+  }
+
+  Timer {
+    // The backstop. Subscribed feeds carry no sync token, so nothing cheap
+    // can tell whether a timetable moved; and a full pass repairs anything
+    // the tokens might have missed.
     interval: 15 * 60 * 1000
     running: true
     repeat: true

@@ -7,6 +7,7 @@ showing the last good sync rather than a spinner.
 
 Subcommands (the panel drives all of these; they also work by hand):
     sync                  Refresh the cache. The default.
+    poll                  Sync only if the server says something changed.
     login <apple-id>      Store a password read from stdin, then sync.
     logout                Forget the account and its password.
     create                Write one event, read as JSON on stdin.
@@ -33,6 +34,7 @@ KEYRING_SERVICE = "io.github.gabbe2312.calendar"
 
 CONFIG_PATH = Path.home() / ".config" / "omarchy" / APP / "config.json"
 CACHE_PATH = Path.home() / ".cache" / "omarchy" / APP / "events.json"
+TOKENS_PATH = Path.home() / ".cache" / "omarchy" / APP / "sync-tokens.json"
 
 DEFAULTS = {
     # Apple's CalDAV endpoint. Any other CalDAV server works too: Fastmail,
@@ -595,6 +597,73 @@ def cmd_delete(args):
     return 0
 
 
+def read_tokens():
+    try:
+        loaded = json.loads(TOKENS_PATH.read_text())
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
+def write_tokens(tokens):
+    try:
+        TOKENS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        TOKENS_PATH.write_text(json.dumps(tokens, indent=2))
+    except Exception:
+        pass
+
+
+def collection_tokens(calendars):
+    """One opaque marker per calendar, which changes when its contents do.
+
+    RFC 6578. The server works out whether anything moved; this end only has
+    to notice that the string is different, which is why the question costs a
+    fraction of what fetching the events costs.
+    """
+    tokens = {}
+    for calendar in calendars:
+        name = calendar_name(calendar, "")
+        if not name:
+            continue
+        try:
+            tokens[name] = str(calendar.objects_by_sync_token(load_objects=False).sync_token)
+        except Exception:
+            # A server that will not answer is treated as changed, so the
+            # fallback is a needless sync rather than a missed one.
+            tokens[name] = ""
+    return tokens
+
+
+def cmd_poll():
+    """Ask whether anything changed, and only then do the expensive thing."""
+    config = load_config()
+    username = str(config.get("username") or "").strip()
+    if not username:
+        return 0
+
+    try:
+        import caldav
+        password = keyring_lookup(username)
+        client = caldav.DAVClient(url=str(config["url"]), username=username,
+                                  password=password, timeout=NETWORK_TIMEOUT)
+        calendars = client.principal().calendars()
+    except Exception:
+        # A poll that cannot reach the server says nothing at all: the cache
+        # keeps its last good answer, and the periodic full sync will report
+        # the trouble in its own words.
+        return 0
+
+    fresh = collection_tokens(calendars)
+    known = read_tokens()
+    if fresh and known and all(known.get(k) == v and v != "" for k, v in fresh.items()) \
+            and set(known) >= set(fresh):
+        print("omadates-sync: unchanged")
+        return 0
+
+    print("omadates-sync: something changed")
+    return cmd_sync()
+
+
 def cmd_map(args):
     """Open a location in whatever this system uses for maps.
 
@@ -915,6 +984,9 @@ def cmd_sync():
     if problems and not events:
         return fail("; ".join(problems))
 
+    if username:
+        write_tokens(collection_tokens(calendars))
+
     events.sort(key=lambda e: (e["start"], e["summary"]))
     write_cache({
         "status": "ok",
@@ -937,6 +1009,8 @@ def main(argv):
         return 0
     if command == "check":
         return cmd_check()
+    if command == "poll":
+        return cmd_poll()
     if command == "map":
         return cmd_map(rest)
     if command == "create":
