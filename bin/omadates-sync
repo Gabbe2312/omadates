@@ -319,26 +319,33 @@ def write_cache(payload):
     os.replace(tmp, CACHE_PATH)
 
 
-def previous_events():
-    """Keep the last good events if this run fails, so the panel stays useful."""
+# What a failed run hands forward from the last good one. Events were always
+# kept — a dropped connection should not blank the calendar — but the calendar
+# lists were not, and the panel decides from those whether an event can be
+# added at all. One flaky sync took the "New event" action away with it.
+CARRIED_FORWARD = ("events", "syncedAt", "availableCalendars", "writableCalendars")
+
+
+def last_good():
     try:
         old = json.loads(CACHE_PATH.read_text())
-        if isinstance(old, dict) and isinstance(old.get("events"), list):
-            return old["events"], old.get("syncedAt", "")
     except Exception:
-        pass
-    return [], ""
+        return {}
+    if not isinstance(old, dict):
+        return {}
+    return {key: old[key] for key in CARRIED_FORWARD if key in old}
 
 
 def fail(message):
-    events, synced_at = previous_events()
-    write_cache({
+    payload = {
         "status": "error",
         "error": message,
         "checkedAt": datetime.now(timezone.utc).isoformat(),
-        "syncedAt": synced_at,
-        "events": events,
-    })
+        "syncedAt": "",
+        "events": [],
+    }
+    payload.update(last_good())
+    write_cache(payload)
     print(f"omadates-sync: {message}", file=sys.stderr)
     return 1
 
