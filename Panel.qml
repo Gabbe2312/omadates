@@ -178,6 +178,24 @@ Panel {
   property string newCalendarColour: "#4A90D9"
   property bool makingCalendar: false
 
+  // Removing a calendar takes everything in it, so it is asked for twice and
+  // told plainly in between. Armed per calendar, and disarmed by leaving.
+  property bool calendarDeleteArmed: false
+  property bool deletingCalendar: false
+
+  readonly property var editedCalendar: {
+    for (var i = 0; i < root.calendars.length; i++)
+      if (String(root.calendars[i].name) === root.calendarEditing) return root.calendars[i]
+    return null
+  }
+
+  readonly property string calendarDeleteWarning: {
+    if (!root.editedCalendar) return ""
+    return root.editedCalendar.subscribed === true
+      ? "This stops following the feed. Whoever publishes it is unaffected, and pasting the address back brings it here again."
+      : "This removes the calendar and everything in it from iCloud, on every device signed in to the account. It cannot be undone from here."
+  }
+
   readonly property var events: Events.visibleEvents(cache.events, hiddenCalendars)
   readonly property var eventMarks: Events.marksByDay(events)
   readonly property bool cacheFailed: cache.status === "error"
@@ -459,8 +477,22 @@ Panel {
     logoutProcess.running = true
   }
 
+  function deleteCalendar() {
+    if (!root.editedCalendar) return
+    root.calendarDeleteArmed = false
+    root.deletingCalendar = true
+    root.pendingColour = JSON.stringify({
+      name: String(root.editedCalendar.name),
+      url: String(root.editedCalendar.url || "")
+    })
+    deleteCalendarProcess.stdinEnabled = true
+    deleteCalendarProcess.command = root.syncCommand.concat(["deletecalendar"])
+    deleteCalendarProcess.running = true
+  }
+
   function startEditingCalendar(name) {
     var key = String(name || "")
+    root.calendarDeleteArmed = false
     if (root.calendarEditing === key) {
       root.closeCalendarEditor()
       return
@@ -477,6 +509,7 @@ Panel {
   // Closing commits whatever is in the field, so a typed name is not lost by
   // clicking away from it.
   function closeCalendarEditor() {
+    root.calendarDeleteArmed = false
     if (root.calendarEditing !== "") root.setCalendarName(root.calendarEditing, nameField.text)
     root.calendarEditing = ""
     Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
@@ -569,12 +602,14 @@ Panel {
     id: writeWatchdog
     interval: 40000
     repeat: false
-    running: root.creating || root.deleting || root.colouring || root.makingCalendar
+    running: root.creating || root.deleting || root.colouring
+      || root.makingCalendar || root.deletingCalendar
     onTriggered: {
       if (root.creating) root.composeError = "That took too long. Nothing was saved as far as this knows"
       if (root.colouring) root.colourError = "That took too long"
       if (root.makingCalendar) root.subscribeError = "That took too long"
       root.makingCalendar = false
+      root.deletingCalendar = false
       root.creating = false
       root.deleting = false
       root.colouring = false
@@ -867,6 +902,26 @@ Panel {
 
   Process {
     id: mapProcess
+  }
+
+  Process {
+    id: deleteCalendarProcess
+    stdinEnabled: true
+    onStarted: {
+      write(root.pendingColour)
+      stdinEnabled = false
+    }
+    onExited: function(exitCode) {
+      root.pendingColour = ""
+      root.deletingCalendar = false
+      if (exitCode === 0) {
+        root.calendarEditing = ""
+        Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
+      } else {
+        root.colourError = "Could not remove it"
+      }
+      calendarCache.reload()
+    }
   }
 
   Process {
@@ -2749,6 +2804,92 @@ Panel {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.closeCalendarEditor()
+                  }
+                }
+
+              }
+
+              // ---- Removing it. Two presses with the consequence spelled
+              //      out in between, because this takes more than a colour
+              //      with it and the two kinds of calendar lose different
+              //      things.
+              Item {
+                width: parent.width
+                height: calendarDeleteRow.implicitHeight
+
+                Text {
+                  id: calendarDeleteRow
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  text: root.deletingCalendar
+                    ? "Removing…"
+                    : (root.calendarDeleteArmed
+                      ? root.calendarDeleteWarning
+                      : (root.editedCalendar && root.editedCalendar.subscribed === true
+                        ? "Stop following this feed"
+                        : "Delete this calendar"))
+                  color: root.calendarDeleteArmed
+                    ? Qt.darker(root.contentForeground, 1.25)
+                    : (calendarDeleteMouse.containsMouse
+                      ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                      : Qt.darker(root.contentForeground, 2.1))
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  wrapMode: Text.WordWrap
+                }
+
+                MouseArea {
+                  id: calendarDeleteMouse
+                  anchors.fill: parent
+                  anchors.margins: -Style.space(4)
+                  hoverEnabled: true
+                  enabled: !root.deletingCalendar && !root.calendarDeleteArmed
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.calendarDeleteArmed = true
+                }
+              }
+
+              // The two answers, offered only once the warning has been
+              // read, and with the safe one first.
+              Row {
+                width: parent.width
+                visible: root.calendarDeleteArmed
+                spacing: Style.space(16)
+
+                Text {
+                  text: "Keep it"
+                  color: keepMouse.containsMouse
+                    ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                    : root.contentForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.bodySmall
+
+                  MouseArea {
+                    id: keepMouse
+                    anchors.fill: parent
+                    anchors.margins: -Style.space(5)
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.calendarDeleteArmed = false
+                  }
+                }
+
+                Text {
+                  text: root.editedCalendar && root.editedCalendar.subscribed === true
+                    ? "Stop following it" : "Delete it"
+                  color: confirmDeleteMouse.containsMouse
+                    ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                    : Qt.darker(root.contentForeground, 1.6)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.bodySmall
+
+                  MouseArea {
+                    id: confirmDeleteMouse
+                    anchors.fill: parent
+                    anchors.margins: -Style.space(5)
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.deleteCalendar()
                   }
                 }
               }

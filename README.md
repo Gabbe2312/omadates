@@ -106,7 +106,7 @@ Calendars**, or on a Mac in Calendar under **File → Get Info**.
 | `+ New event` | Add one to the day you are looking at |
 | `Delete` in an open event | Remove it; press twice to confirm |
 | Click a calendar | Hide or show it |
-| Right-click a calendar | Rename it, or set the colour every device sees |
+| Right-click a calendar | Rename it, recolour it, or remove it |
 | Right-click the year bar | Put the year meter away; the hairline it leaves behind brings it back |
 | `+` | Make a calendar, or subscribe to a feed |
 | Scroll / `[` `]` | Previous and next month |
@@ -128,6 +128,11 @@ Recolouring a calendar your account owns sets its colour on the server, so it
 changes on your phone and everywhere else too. A subscribed feed cannot take
 one, so there the colour stays a local note with a way back to whatever the
 feed publishes.
+
+Removing one is asked for twice, with what it costs written out in between.
+Deleting a calendar your account owns takes it and everything in it off the
+server, on every device. Dropping a subscription only forgets a URL: whoever
+publishes it is unaffected, and pasting the address back brings it here again.
 
 Renaming is always local, stored next to the widget in `shell.json`. A sync
 never overwrites it, and the calendar's original name stays its identity

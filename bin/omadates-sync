@@ -14,6 +14,7 @@ Subcommands (the panel drives all of these; they also work by hand):
     delete                Remove one event, read as JSON on stdin.
     colour                Set a calendar's colour on the server, JSON on stdin.
     newcalendar           Make a calendar on the server, JSON on stdin.
+    deletecalendar        Remove a calendar, or drop a feed. JSON on stdin.
     map <location>        Open a location in the system's map handler.
     subscribe <url>       Add a webcal:// or https://….ics feed, then sync.
     unsubscribe <url>     Drop a feed, then sync.
@@ -729,6 +730,64 @@ def cmd_newcalendar(args):
     return cmd_sync()
 
 
+def cmd_deletecalendar(args):
+    """Remove a calendar, or stop following a feed.
+
+    The two are not the same act. Deleting a calendar the account owns takes
+    it and everything in it off the server, on every device. Dropping a
+    subscription only forgets a URL; whoever publishes it is unaffected and
+    can be followed again by pasting it back.
+    """
+    try:
+        payload = json.loads(sys.stdin.read() or "{}")
+    except Exception as exc:
+        print(f"omadates-sync: unreadable payload: {exc}", file=sys.stderr)
+        return 2
+
+    name = str(payload.get("name") or "").strip()
+    url = str(payload.get("url") or "").strip()
+    if not name and not url:
+        return fail("no calendar given")
+
+    if url:
+        config = load_config()
+        before = config.get("subscriptions") or []
+        config["subscriptions"] = [e for e in before if e.get("url") != url]
+        if len(config["subscriptions"]) == len(before):
+            return fail("that subscription is not in the list")
+        save_config(config)
+        print(f"omadates-sync: stopped following '{name or url}'")
+        return cmd_sync()
+
+    config = load_config()
+    username = str(config.get("username") or "").strip()
+    if not username:
+        return fail("not signed in")
+
+    import caldav
+    try:
+        password = keyring_lookup(username)
+        client = caldav.DAVClient(url=str(config["url"]), username=username,
+                                  password=password, timeout=NETWORK_TIMEOUT)
+        calendars = client.principal().calendars()
+    except Exception as exc:
+        return fail(friendly_error(exc))
+
+    for candidate in calendars:
+        if calendar_name(candidate, "") != name:
+            continue
+        try:
+            candidate.delete()
+        except Exception as exc:
+            return fail(friendly_error(exc))
+        break
+    else:
+        return fail(f"no calendar named '{name}'")
+
+    print(f"omadates-sync: deleted calendar '{name}'")
+    return cmd_sync()
+
+
 def cmd_colour(args):
     """Set a calendar's colour on the server, where every device reads it.
 
@@ -1112,6 +1171,10 @@ def cmd_sync():
                     "name": name,
                     "color": fetched[0]["color"] if fetched else "",
                     "writable": False, "subscribed": True,
+                    # Kept so the panel can say which subscription to drop:
+                    # the name shown is whatever the feed calls itself, which
+                    # is not what the config is keyed by.
+                    "url": str(entry.get("url") or ""),
                 })
         except Exception as exc:
             problems.append(f"{label}: {friendly_error(exc)}")
@@ -1155,6 +1218,8 @@ def main(argv):
         return cmd_colour(rest)
     if command == "newcalendar":
         return cmd_newcalendar(rest)
+    if command == "deletecalendar":
+        return cmd_deletecalendar(rest)
     if command == "login":
         return cmd_login(rest)
     if command == "logout":
