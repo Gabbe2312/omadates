@@ -165,9 +165,15 @@ Panel {
   // Only one of the two rows shows at a time. They occupy the same slot
   // under the calendar switches.
   property string calendarEditing: ""
-  property bool addingSubscription: false
+  // "" closed, "choose" asking which, "feed" pasting a URL, "calendar"
+  // naming a new one. The + used to mean only the middle of those.
+  property string addMode: ""
+  readonly property bool addingSubscription: root.addMode !== ""
   property bool subscribing: false
   property string subscribeError: ""
+
+  property string newCalendarColour: "#4A90D9"
+  property bool makingCalendar: false
 
   readonly property var events: Events.visibleEvents(cache.events, hiddenCalendars)
   readonly property var eventMarks: Events.marksByDay(events)
@@ -560,10 +566,12 @@ Panel {
     id: writeWatchdog
     interval: 40000
     repeat: false
-    running: root.creating || root.deleting || root.colouring
+    running: root.creating || root.deleting || root.colouring || root.makingCalendar
     onTriggered: {
       if (root.creating) root.composeError = "That took too long. Nothing was saved as far as this knows"
       if (root.colouring) root.colourError = "That took too long"
+      if (root.makingCalendar) root.subscribeError = "That took too long"
+      root.makingCalendar = false
       root.creating = false
       root.deleting = false
       root.colouring = false
@@ -622,17 +630,43 @@ Panel {
   function startAddingSubscription() {
     root.calendarEditing = ""
     root.subscribeError = ""
-    root.addingSubscription = true
-    Qt.callLater(function() {
+    // Only offer the choice where both halves are possible: without an
+    // account there is nowhere to make a calendar, and a feed is the only
+    // thing on the table.
+    root.addMode = root.signedIn ? "choose" : "feed"
+    if (root.addMode === "feed") Qt.callLater(function() {
       urlField.text = ""
       urlField.forceActiveFocus()
     })
   }
 
+  function chooseAddMode(mode) {
+    root.subscribeError = ""
+    root.addMode = String(mode)
+    Qt.callLater(function() {
+      if (root.addMode === "feed") { urlField.text = ""; urlField.forceActiveFocus() }
+      else if (root.addMode === "calendar") { newCalendarField.text = ""; newCalendarField.forceActiveFocus() }
+    })
+  }
+
   function cancelAddingSubscription() {
-    root.addingSubscription = false
+    root.addMode = ""
     root.subscribeError = ""
     Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
+  }
+
+  function createCalendar() {
+    var name = String(newCalendarField.text || "").replace(/^\s+|\s+$/g, "")
+    if (name === "") {
+      root.subscribeError = "A calendar needs a name"
+      return
+    }
+    root.subscribeError = ""
+    root.makingCalendar = true
+    root.pendingColour = JSON.stringify({ name: name, color: root.newCalendarColour })
+    newCalendarProcess.stdinEnabled = true
+    newCalendarProcess.command = root.syncCommand.concat(["newcalendar"])
+    newCalendarProcess.running = true
   }
 
   // The helper writes the subscription to calendar.json and re-runs the sync
@@ -830,6 +864,22 @@ Panel {
 
   Process {
     id: mapProcess
+  }
+
+  Process {
+    id: newCalendarProcess
+    stdinEnabled: true
+    onStarted: {
+      write(root.pendingColour)
+      stdinEnabled = false
+    }
+    onExited: function(exitCode) {
+      root.pendingColour = ""
+      root.makingCalendar = false
+      if (exitCode === 0) root.cancelAddingSubscription()
+      else root.subscribeError = "Could not create it. See the sync line above"
+      calendarCache.reload()
+    }
   }
 
   Process {
@@ -2701,12 +2751,161 @@ Panel {
               }
               }
 
+              // ---- Which kind. Both end up in the calendar row beside the
+              //      others, but one is made on your account and the other is
+              //      somebody else's file, read from a URL.
+              Row {
+                width: parent.width
+                visible: root.addMode === "choose"
+                spacing: Style.space(16)
+
+                Text {
+                  text: "New calendar"
+                  color: newCalMouse.containsMouse
+                    ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                    : Qt.darker(root.contentForeground, 1.4)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.bodySmall
+
+                  MouseArea {
+                    id: newCalMouse
+                    anchors.fill: parent
+                    anchors.margins: -Style.space(5)
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.chooseAddMode("calendar")
+                  }
+
+                  PanelToolTip {
+                    visible: newCalMouse.containsMouse
+                    text: "Make one on your account, visible on every device"
+                    fontFamily: root.contentFontFamily
+                  }
+                }
+
+                Text {
+                  text: "Subscribe to a feed"
+                  color: feedMouse.containsMouse
+                    ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                    : Qt.darker(root.contentForeground, 1.4)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.bodySmall
+
+                  MouseArea {
+                    id: feedMouse
+                    anchors.fill: parent
+                    anchors.margins: -Style.space(5)
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.chooseAddMode("feed")
+                  }
+
+                  PanelToolTip {
+                    visible: feedMouse.containsMouse
+                    text: "Read a webcal or .ics published somewhere else"
+                    fontFamily: root.contentFontFamily
+                  }
+                }
+              }
+
+              // ---- Naming a new one. The colour is asked for here because
+              //      it is the only thing worth deciding up front; the rest
+              //      of what a calendar is, is what you put in it.
+              Column {
+                width: parent.width
+                visible: root.addMode === "calendar"
+                spacing: Style.space(5)
+
+                TextField {
+                  id: newCalendarField
+                  width: parent.width
+                  placeholderText: "Calendar name"
+                  foreground: root.contentForeground
+                  font.family: root.contentFontFamily
+                  Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_Escape) {
+                      root.cancelAddingSubscription(); event.accepted = true
+                    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                      root.createCalendar(); event.accepted = true
+                    }
+                  }
+                }
+
+                Item {
+                  width: parent.width
+                  height: Math.max(newCalSwatches.implicitHeight, makeButton.implicitHeight)
+
+                  Row {
+                    id: newCalSwatches
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Style.space(6)
+
+                    Repeater {
+                      model: Events.palette()
+
+                      Rectangle {
+                        id: newSwatch
+                        required property var modelData
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Style.space(11)
+                        height: width
+                        radius: width / 2
+                        color: String(newSwatch.modelData)
+                        border.width: String(newSwatch.modelData) === root.newCalendarColour
+                          ? Style.spacing.hairline : 0
+                        border.color: root.contentForeground
+
+                        MouseArea {
+                          anchors.fill: parent
+                          cursorShape: Qt.PointingHandCursor
+                          onClicked: root.newCalendarColour = String(newSwatch.modelData)
+                        }
+                      }
+                    }
+                  }
+
+                  Text {
+                    id: makeButton
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.makingCalendar ? "Creating…" : "Create"
+                    color: makeMouse.containsMouse
+                      ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                      : root.contentForeground
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.bold: true
+
+                    MouseArea {
+                      id: makeMouse
+                      anchors.fill: parent
+                      anchors.margins: -Style.space(5)
+                      hoverEnabled: true
+                      enabled: !root.makingCalendar
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: root.createCalendar()
+                    }
+                  }
+                }
+
+                Text {
+                  width: parent.width
+                  visible: root.subscribeError !== ""
+                  text: root.subscribeError
+                  color: Qt.darker(root.contentForeground, 1.3)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  wrapMode: Text.WordWrap
+                }
+              }
+
               // ---- Pasting a feed URL, with the directions to find one.
               //      iCloud cannot supply these, so the panel has to say
               //      where they actually live.
               Column {
                 width: parent.width
-                visible: root.addingSubscription
+                visible: root.addMode === "feed"
                 spacing: Style.space(4)
 
                 TextField {

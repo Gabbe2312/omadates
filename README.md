@@ -75,6 +75,18 @@ without touching anything else.
 It never lands in a config file, is never passed as a command-line argument,
 and reaches the sync helper on stdin.
 
+## Adding a calendar
+
+`+` at the end of the calendar row asks which kind you mean.
+
+**A new calendar** is made on your account, so it appears on your phone and
+everywhere else you are signed in, and events can be written to it. Name it,
+pick a colour, done.
+
+**A subscribed feed** is somebody else's file, read from a URL. It cannot be
+written to, and its colour is a local note rather than something the server
+keeps.
+
 ## Subscribed calendars
 
 iCloud does not store `webcal://` subscriptions. Your phone keeps only the
@@ -96,7 +108,7 @@ Calendars**, or on a Mac in Calendar under **File → Get Info**.
 | Click a calendar | Hide or show it |
 | Right-click a calendar | Rename it, or set the colour every device sees |
 | Right-click the year bar | Put the year meter away; the hairline it leaves behind brings it back |
-| `+` | Subscribe to a feed |
+| `+` | Make a calendar, or subscribe to a feed |
 | Scroll / `[` `]` | Previous and next month |
 | `{` `}` | Previous and next year |
 | `t` | Back to today |
