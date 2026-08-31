@@ -24,12 +24,10 @@ omarchy plugin add https://github.com/Gabbe2312/omarchy-icalendar.git --enable
 The packages are separate because a plugin cannot install system packages for
 you. If you skip them, the panel tells you exactly which line to run.
 
-`--enable` puts it in the centre of the bar. To use it *instead of* the stock
-clock rather than beside it, switch that one off:
-
-```bash
-omarchy plugin disable omarchy.clock
-```
+`--enable` puts it in the centre of the bar, beside Omarchy's own clock. Open
+this one and it offers to take that one off the bar for you — the stock clock
+stays installed, so `omarchy bar put omarchy.clock --section center` brings it
+back whenever you want it.
 
 Omarchy pins one centre widget in place and hangs the rest off its edges, so
 things that appear on hover grow outward instead of shoving the clock

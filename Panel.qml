@@ -418,6 +418,48 @@ Panel {
     subscribeProcess.running = true
   }
 
+  // ---- The stock clock, still sitting on the bar beside this one.
+  //
+  // Two clocks is the one thing a fresh install can get visibly wrong, and
+  // the fix would otherwise be a terminal command. So the panel offers it,
+  // rather than either nagging about it or quietly deciding for you: someone
+  // may well want both for a while to compare them.
+  readonly property bool builtinClockOnBar: {
+    if (!root.bar || !root.bar.shell) return false
+    var config = root.bar.shell.shellConfig
+    if (!config || !config.bar || !config.bar.layout) return false
+    var sections = ["left", "center", "right"]
+    for (var s = 0; s < sections.length; s++) {
+      var list = config.bar.layout[sections[s]]
+      if (!(list instanceof Array)) continue
+      for (var i = 0; i < list.length; i++)
+        if (list[i] && String(list[i].id) === "omarchy.clock") return true
+    }
+    return false
+  }
+
+  // Off the bar, not uninstalled: the plugin stays enabled, so
+  // `omarchy bar put omarchy.clock --section center` brings it straight back.
+  function hideBuiltinClock() {
+    if (!root.bar || !root.bar.shell) return
+    var shell = root.bar.shell
+    if (typeof shell.persistShellConfig !== "function") return
+    var config = shell.shellConfig
+    if (!config || !config.bar || !config.bar.layout) return
+
+    var next = JSON.parse(JSON.stringify(config))
+    var sections = ["left", "center", "right"]
+    for (var s = 0; s < sections.length; s++) {
+      var list = next.bar.layout[sections[s]]
+      if (!(list instanceof Array)) continue
+      var kept = []
+      for (var i = 0; i < list.length; i++)
+        if (!list[i] || String(list[i].id) !== "omarchy.clock") kept.push(list[i])
+      next.bar.layout[sections[s]] = kept
+    }
+    shell.persistShellConfig(next)
+  }
+
   function setWeekStart(day) {
     var next = Model.normalizedWeekStart(day, root.weekStart)
     if (next === root.weekStart) return
@@ -1485,6 +1527,52 @@ Panel {
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.bodySmall
                 wrapMode: Text.WordWrap
+              }
+
+              // Only while both clocks are on the bar; taking the offer is
+              // what makes it go away.
+              Item {
+                width: parent.width
+                visible: root.builtinClockOnBar
+                height: visible ? Math.max(hideClockAction.implicitHeight, Style.space(12)) : 0
+
+                Text {
+                  anchors.left: parent.left
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: parent.width - hideClockAction.width - Style.space(10)
+                  elide: Text.ElideRight
+                  text: "Omarchy's own clock is on the bar too"
+                  color: Qt.darker(root.contentForeground, 1.9)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                }
+
+                Text {
+                  id: hideClockAction
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "Hide it"
+                  color: hideClockMouse.containsMouse
+                    ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                    : Qt.darker(root.contentForeground, 1.4)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+
+                  MouseArea {
+                    id: hideClockMouse
+                    anchors.fill: parent
+                    anchors.margins: -Style.space(5)
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.hideBuiltinClock()
+                  }
+
+                  PanelToolTip {
+                    visible: hideClockMouse.containsMouse
+                    text: "Take it off the bar — it stays installed"
+                    fontFamily: root.contentFontFamily
+                  }
+                }
               }
 
               // ---- Calendars, doubling as the legend and the switches.
