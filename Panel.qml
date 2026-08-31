@@ -468,6 +468,7 @@ Panel {
 
   function cancelComposing() {
     root.composing = false
+    root.creating = false
     root.composeError = ""
     Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
   }
@@ -520,6 +521,22 @@ Panel {
   }
 
   property string pendingPayload: ""
+
+  // The helper has its own network timeout, but a process can die in ways
+  // that never reach onExited. Without this the button would sit on
+  // "Creating…" until the shell was restarted, which is what happened.
+  Timer {
+    id: writeWatchdog
+    interval: 40000
+    repeat: false
+    running: root.creating || root.deleting
+    onTriggered: {
+      if (root.creating) root.composeError = "That took too long. Nothing was saved as far as this knows"
+      root.creating = false
+      root.deleting = false
+      calendarCache.reload()
+    }
+  }
 
   // Which event is one click from being removed. Armed by the first press
   // and cleared by anything else, so nothing goes on a single stray click
@@ -1678,22 +1695,34 @@ Panel {
                         font.pixelSize: Style.font.bodySmall
                       }
 
+                      Text {
+                        width: parent.width
+                        text: root.displayName(eventRow.modelData.calendar)
+                        color: eventRow.tint
+                        font.family: root.contentFontFamily
+                        font.pixelSize: Style.font.caption
+                        elide: Text.ElideRight
+                      }
+
+                      Text {
+                        width: parent.width
+                        visible: eventRow.modelData.description !== ""
+                        topPadding: visible ? Style.space(3) : 0
+                        text: eventRow.modelData.description
+                        color: Qt.darker(root.contentForeground, 1.8)
+                        font.family: root.contentFontFamily
+                        font.pixelSize: Style.font.caption
+                        wrapMode: Text.WordWrap
+                      }
+
+                      // Last in the block, whatever the block holds. Notes
+                      // vary in length, so anchoring it to the calendar line
+                      // put it in a different place on every event; the
+                      // bottom right corner is always the bottom right.
                       Item {
                         width: parent.width
-                        height: Math.max(eventCalendarName.implicitHeight,
-                          deleteAction.implicitHeight)
-
-                        Text {
-                          id: eventCalendarName
-                          anchors.left: parent.left
-                          anchors.verticalCenter: parent.verticalCenter
-                          width: parent.width - deleteAction.width - Style.space(10)
-                          text: root.displayName(eventRow.modelData.calendar)
-                          color: eventRow.tint
-                          font.family: root.contentFontFamily
-                          font.pixelSize: Style.font.caption
-                          elide: Text.ElideRight
-                        }
+                        visible: root.canDelete(eventRow.modelData)
+                        height: deleteAction.implicitHeight + Style.space(4)
 
                         // Two presses, not one. The first says what the
                         // second will do, and a repeating event says that it
@@ -1702,8 +1731,7 @@ Panel {
                         Text {
                           id: deleteAction
                           anchors.right: parent.right
-                          anchors.verticalCenter: parent.verticalCenter
-                          visible: root.canDelete(eventRow.modelData)
+                          anchors.bottom: parent.bottom
                           text: root.deleting
                             ? "Deleting…"
                             : (root.deleteArmed === Events.eventKey(eventRow.modelData)
@@ -1735,17 +1763,6 @@ Panel {
                             fontFamily: root.contentFontFamily
                           }
                         }
-                      }
-
-                      Text {
-                        width: parent.width
-                        visible: eventRow.modelData.description !== ""
-                        topPadding: visible ? Style.space(3) : 0
-                        text: eventRow.modelData.description
-                        color: Qt.darker(root.contentForeground, 1.8)
-                        font.family: root.contentFontFamily
-                        font.pixelSize: Style.font.caption
-                        wrapMode: Text.WordWrap
                       }
                     }
                   }
@@ -2008,7 +2025,7 @@ Panel {
                   id: composeAction
                   anchors.left: parent.left
                   anchors.verticalCenter: parent.verticalCenter
-                  text: root.composing ? "×  Cancel" : "+  New event"
+                  text: root.composing ? "× Cancel" : "+ New event"
                   color: composeMouse.containsMouse || root.composing
                     ? Style.hoverStateColor(root.contentForeground, Color.accent)
                     : Qt.darker(root.contentForeground, 1.9)

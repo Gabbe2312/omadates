@@ -54,6 +54,11 @@ DEFAULTS = {
 # not a mail body, so this keeps the opening of it and drops the rest.
 DESCRIPTION_LIMIT = 600
 
+# A half-open connection otherwise waits forever, and the panel sits saying
+# "Creating…" until the shell is restarted. Long enough for a slow line,
+# short enough to be an answer rather than a hang.
+NETWORK_TIMEOUT = 25
+
 REQUIREMENTS = [
     ("caldav", "python-caldav"),
     ("icalendar", "python-icalendar"),
@@ -336,6 +341,35 @@ def last_good():
     return {key: old[key] for key in CARRIED_FORWARD if key in old}
 
 
+def edit_cache(change):
+    """Apply a change to the cached events without going back to the server.
+
+    The write has already happened; making someone wait out a full re-sync
+    before the panel admits it turns a one-second action into five, and into
+    an indefinite wait on a bad line. The next scheduled sync reconciles.
+    """
+    try:
+        cache = json.loads(CACHE_PATH.read_text())
+    except Exception:
+        return
+    if not isinstance(cache, dict) or not isinstance(cache.get("events"), list):
+        return
+    cache["events"] = change(cache["events"])
+    cache["events"].sort(key=lambda e: (e.get("start", ""), e.get("summary", "")))
+    write_cache(cache)
+
+
+def cached_colour(name):
+    try:
+        cache = json.loads(CACHE_PATH.read_text())
+        for event in cache.get("events", []):
+            if event.get("calendar") == name:
+                return event.get("color", "")
+    except Exception:
+        pass
+    return ""
+
+
 def fail(message):
     payload = {
         "status": "error",
@@ -454,7 +488,8 @@ def cmd_create(args):
     import caldav
     try:
         password = keyring_lookup(username)
-        client = caldav.DAVClient(url=str(config["url"]), username=username, password=password)
+        client = caldav.DAVClient(url=str(config["url"]), username=username,
+                                 password=password, timeout=NETWORK_TIMEOUT)
         calendars = client.principal().calendars()
     except Exception as exc:
         return fail(friendly_error(exc))
@@ -469,8 +504,11 @@ def cmd_create(args):
     else:
         return fail(f"no calendar named '{target}'")
 
+    built = build_event(event, tz, target, cached_colour(target), subscribed=False)
+    if built:
+        edit_cache(lambda events: events + [built])
     print(f"omadates-sync: created '{summary}'")
-    return cmd_sync()
+    return 0
 
 
 def cmd_delete(args):
@@ -501,7 +539,8 @@ def cmd_delete(args):
     import caldav
     try:
         password = keyring_lookup(username)
-        client = caldav.DAVClient(url=str(config["url"]), username=username, password=password)
+        client = caldav.DAVClient(url=str(config["url"]), username=username,
+                                 password=password, timeout=NETWORK_TIMEOUT)
         calendars = client.principal().calendars()
     except Exception as exc:
         return fail(friendly_error(exc))
@@ -551,8 +590,9 @@ def cmd_delete(args):
     else:
         return fail(f"no calendar named '{target}'")
 
+    edit_cache(lambda events: [e for e in events if e.get("uid") != uid])
     print(f"omadates-sync: deleted {uid}")
-    return cmd_sync()
+    return 0
 
 
 def cmd_map(args):
@@ -729,7 +769,8 @@ def verify_credentials(url, username, password):
     calendar that quietly stops updating.
     """
     import caldav
-    caldav.DAVClient(url=url, username=username, password=password).principal().calendars()
+    caldav.DAVClient(url=url, username=username, password=password,
+                     timeout=NETWORK_TIMEOUT).principal().calendars()
 
 
 def cmd_login(args):
@@ -842,7 +883,8 @@ def cmd_sync():
         import caldav
         try:
             password = keyring_lookup(username)
-            client = caldav.DAVClient(url=str(config["url"]), username=username, password=password)
+            client = caldav.DAVClient(url=str(config["url"]), username=username,
+                                 password=password, timeout=NETWORK_TIMEOUT)
             calendars = client.principal().calendars()
         except Exception as exc:
             return fail(friendly_error(exc))
