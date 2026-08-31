@@ -78,7 +78,7 @@ BarWidget {
   // With a valid anchor the bar pins that one widget to the middle and hangs
   // everything else off its edges, so an indicator revealing on hover grows
   // leftward and the clock holds still. With no valid anchor it centres the
-  // whole row as one block, and every reveal shoves the clock sideways —
+  // whole row as one block, and every reveal shoves the clock sideways,
   // right as you are reaching for it.
   //
   // Omarchy ships the anchor naming its own clock. Switch that clock off in

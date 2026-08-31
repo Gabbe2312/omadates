@@ -9,7 +9,7 @@ with the invitation. The popup grows a line per event rather than scrolling a
 fixed box.
 
 Works with **iCloud**, any **CalDAV** server (Fastmail, Nextcloud, Radicale),
-and **webcal subscriptions** — the holiday and timetable feeds your phone
+and **webcal subscriptions**: the holiday and timetable feeds your phone
 carries but iCloud never stores.
 
 ![The calendar popup](preview.png)
@@ -25,13 +25,13 @@ The packages are separate because a plugin cannot install system packages for
 you. If you skip them, the panel tells you exactly which line to run.
 
 `--enable` puts it in the centre of the bar, beside Omarchy's own clock. Open
-this one and it offers to take that one off the bar for you — the stock clock
+this one and it offers to take that one off the bar for you. The stock clock
 stays installed, so `omarchy bar put omarchy.clock --section center` brings it
 back whenever you want it.
 
 Omarchy pins one centre widget in place and hangs the rest off its edges, so
 things that appear on hover grow outward instead of shoving the clock
-sideways. That pin — `bar.centerAnchor` in `shell.json` — ships pointing at
+sideways. That pin, `bar.centerAnchor` in `shell.json`, ships pointing at
 the stock clock, and switching it off leaves it dangling. This plugin takes
 the pin over on first load when it finds it that way. It leaves an anchor
 that still resolves alone, and never claims a blank one, since blank means
@@ -42,7 +42,7 @@ that still resolves alone, and never claims a blank one, since blank means
 Optional. A subscribed feed works on its own, so if all you want is a
 timetable or a holiday calendar, skip to the next section.
 
-You need an **app-specific password** — not your normal Apple password. Apple
+You need an **app-specific password**, not your normal Apple password. Apple
 offers no browser sign-in for calendar access, and CalDAV has nowhere to type
 a two-factor code, so this is the supported way in. It is revocable on its
 own and useless anywhere else.
@@ -64,8 +64,8 @@ and reaches the sync helper on stdin.
 
 ## Subscribed calendars
 
-iCloud does not store `webcal://` subscriptions — your phone keeps only the
-URL and fetches the feed itself — so they have to be added here too. Press the
+iCloud does not store `webcal://` subscriptions. Your phone keeps only the
+URL and fetches the feed itself, so they have to be added here too. Press the
 `+` at the end of the calendar row and paste the URL.
 
 Find it on iPhone under **Settings → Apps → Calendar → Accounts → Subscribed
@@ -85,7 +85,7 @@ Calendars**, or on a Mac in Calendar under **File → Get Info**.
 | `t` | Back to today |
 | `w` | Switch which day the week starts on |
 
-Clicking an event opens the half the list leaves out — when it ends, which
+Clicking an event opens the half the list leaves out: when it ends, which
 calendar it came from, and whatever notes the invitation carried.
 
 ![An event opened](docs/event-detail.png)
@@ -94,8 +94,8 @@ Renaming and recolouring are display choices, stored next to the widget in
 `shell.json`. A sync never overwrites them, and the calendar's original name
 stays its identity underneath.
 
-Everything the stock Omarchy clock does — the label formats on right-click,
-the year bar, the timezone picker, memento mori — is still there.
+Everything the stock Omarchy clock does is still there: the label formats on
+right-click, the year bar, the timezone picker, memento mori.
 
 ## How it syncs
 
@@ -142,4 +142,4 @@ The clock, month grid and week numbering are Omarchy's own, MIT-licensed and
 lightly reshaped to make room for events. See `LICENSE`.
 
 Plugins run unsandboxed, as arbitrary code inside your shell process. Read
-what you install — this one included.
+what you install, this one included.

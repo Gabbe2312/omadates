@@ -80,7 +80,7 @@ Panel {
   //      answer when the laptop is offline.
   property var cache: Events.parseCache("")
   // Which calendars are switched off, kept in shell.json so the choice
-  // outlives a restart. Hiding is a display choice only — the events stay in
+  // outlives a restart. Hiding is a display choice only; the events stay in
   // the cache, so switching one back on is instant.
   readonly property var hiddenCalendars: setting("hiddenCalendars", [])
   readonly property var calendars: Events.calendarsIn(cache.events)
@@ -91,7 +91,7 @@ Panel {
   readonly property var calendarColors: setting("calendarColors", ({}))
 
   // Names you have given a calendar yourself. Subscribed feeds often supply
-  // none at all — the sync falls back to a placeholder — and Apple's own
+  // none at all, in which case the sync falls back to a placeholder, and Apple's own
   // names are not always what you would call them either.
   readonly property var calendarNames: setting("calendarNames", ({}))
 
@@ -99,7 +99,7 @@ Panel {
   // look something up, not to unfold the whole day.
   property string expandedEvent: ""
 
-  // The helper lives beside this file, wherever the plugin was installed —
+  // The helper lives beside this file, wherever the plugin was installed.
   // there is nothing on PATH to rely on for a plugin someone downloaded.
   readonly property string pluginDir: String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "")
   readonly property var syncCommand: [root.pluginDir + "bin/omadates-sync"]
@@ -122,7 +122,7 @@ Panel {
   readonly property var missingPackages: cache.missing instanceof Array ? cache.missing : []
 
   // Which calendar's swatches are open, and whether the URL field is up.
-  // Only one of the two rows shows at a time — they occupy the same slot
+  // Only one of the two rows shows at a time. They occupy the same slot
   // under the calendar switches.
   property string calendarEditing: ""
   property bool addingSubscription: false
@@ -135,7 +135,7 @@ Panel {
   readonly property bool cacheMissing: cache.status === "empty"
 
   // The day the list below the grid is showing. Today until you click
-  // another one — the question a calendar answers by default is "what is on
+  // another one. The question a calendar answers by default is "what is on
   // today", and everything else is a deliberate click away.
   property string selectedKey: todayKey
   onSelectedKeyChanged: root.expandedEvent = ""
@@ -182,7 +182,7 @@ Panel {
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
 
   // Every day cell reserves room for the dot rail, so the number sits in the
-  // same place whether the day has dots or not — toggling a calendar must not
+  // same place whether the day has dots or not. Toggling a calendar must not
   // make the whole grid twitch.
   readonly property int dotRailOffset: Style.space(3)
 
@@ -417,7 +417,7 @@ Panel {
   }
 
   // The helper writes the subscription to calendar.json and re-runs the sync
-  // itself, so the cache — and with it this panel — updates on its own.
+  // itself, so the cache, and with it this panel, updates on its own.
   function commitSubscription() {
     var url = String(urlField.text || "").replace(/^\s+|\s+$/g, "")
     if (!Events.looksLikeCalendarUrl(url)) {
@@ -453,7 +453,7 @@ Panel {
   // Standing in for the stock clock rather than just deleting it.
   //
   // Deleting left a hole and closed it up, so whatever sat to the clock's
-  // right slid over to this widget's left — the keyboard layout ending up on
+  // right slid over to this widget's left, the keyboard layout ending up on
   // the wrong side of the calendar. Taking the clock's exact slot instead
   // leaves the bar looking precisely as it did before, with this widget
   // where that one was.
@@ -470,7 +470,7 @@ Panel {
     var next = JSON.parse(JSON.stringify(config))
     var sections = ["left", "center", "right"]
 
-    // This widget's own entry, settings and all — the move must not cost it
+    // This widget's own entry, settings and all. The move must not cost it
     // its colours, names or label format.
     var mine = null
     for (var a = 0; a < sections.length; a++) {
@@ -599,7 +599,7 @@ Panel {
         // Short enough to sit beside the button without being elided; the
         // line underneath already says where an app-specific password
         // comes from, so it does not need repeating here.
-        root.signInError = "Sign-in failed — check both fields"
+        root.signInError = "Sign-in failed. Check both fields"
       }
       calendarCache.reload()
     }
@@ -623,7 +623,7 @@ Panel {
       } else {
         // The helper prints the real reason; this is only the nudge to go
         // look, since the panel has no room to quote a stack trace.
-        root.subscribeError = "Could not add that calendar — check the URL"
+        root.subscribeError = "Could not add that calendar. Check the URL"
       }
       calendarCache.reload()
     }
@@ -1090,7 +1090,7 @@ Panel {
                       // Today is outlined, not filled: a lit-up block shouts
                       // over a grid this quiet. The day being read below the
                       // grid is the filled one, so the two marks never say
-                      // the same thing twice — on most days today is both.
+                      // the same thing twice. On most days today is both.
                       color: dayCell.selected
                         ? Style.selectedFillFor(root.contentForeground, Color.accent)
                         : (dayMouse.containsMouse
@@ -1470,7 +1470,7 @@ Panel {
                   color: Qt.darker(root.contentForeground, 1.8)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
-                  // Break between package names, not inside them — a command
+                  // Break between package names, not inside them. A command
                   // meant to be read and retyped must not split a word.
                   wrapMode: Text.Wrap
                 }
@@ -1503,7 +1503,7 @@ Panel {
                   // an arbitrary rule without it.
                   text: "Apple has no browser sign-in for calendars, and CalDAV has "
                     + "nowhere to type a two-factor code. So it needs a password made "
-                    + "for this one purpose — revocable on its own, and useless anywhere else."
+                    + "for this one purpose. It is revocable on its own, and useless anywhere else."
                   color: Qt.darker(root.contentForeground, 1.75)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
@@ -1650,8 +1650,8 @@ Panel {
                   }
                 }
 
-                // An account is not actually required — a subscribed feed
-                // works on its own — but the form above says otherwise by
+                // An account is not actually required, since a subscribed
+                // feed works on its own, but the form above says otherwise by
                 // being the only thing on offer. So it says so.
                 Text {
                   width: parent.width
@@ -1705,7 +1705,7 @@ Panel {
                       anchors.verticalCenter: parent.verticalCenter
                       spacing: Style.space(5)
 
-                      // Filled when the calendar is on, hollow when off —
+                      // Filled when the calendar is on, hollow when off:
                       // the same shape as the dots in the grid, so the row
                       // reads as a key to them rather than a separate idea.
                       Rectangle {
@@ -1876,7 +1876,7 @@ Panel {
                 // A feed that supplied no name of its own arrives as a
                 // placeholder, so this is often the only way it gets called
                 // anything useful. The original name stays the identity
-                // underneath — this only changes what is printed.
+                // underneath. This only changes what is printed.
                 TextField {
                   id: nameField
                   width: parent.width
@@ -2021,7 +2021,7 @@ Panel {
 
               // Only while both clocks are on the bar; taking the offer is
               // what makes it go away. It sits at the very foot of the panel
-              // with a surface of its own — a one-time piece of setup should
+              // with a surface of its own. A one-time piece of setup should
               // be findable at a glance, and then gone for good.
               Rectangle {
                 width: parent.width
@@ -2077,7 +2077,7 @@ Panel {
 
                 PanelToolTip {
                   visible: hideClockMouse.containsMouse
-                  text: "Take it off the bar — it stays installed"
+                  text: "Take it off the bar. It stays installed"
                   fontFamily: root.contentFontFamily
                 }
               }

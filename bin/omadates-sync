@@ -2,7 +2,7 @@
 """Fetch calendar events into a JSON cache the Omarchy shell can read.
 
 The shell never talks to the network. It watches one JSON file and redraws,
-which is what keeps the calendar popup instant and keeps it useful offline —
+which is what keeps the calendar popup instant and keeps it useful offline,
 showing the last good sync rather than a spinner.
 
 Subcommands (the panel drives all of these; they also work by hand):
@@ -31,8 +31,8 @@ CONFIG_PATH = Path.home() / ".config" / "omarchy" / APP / "config.json"
 CACHE_PATH = Path.home() / ".cache" / "omarchy" / APP / "events.json"
 
 DEFAULTS = {
-    # Apple's CalDAV endpoint. Any other CalDAV server works too — Fastmail,
-    # Nextcloud, a self-hosted Radicale — by putting its URL here.
+    # Apple's CalDAV endpoint. Any other CalDAV server works too: Fastmail,
+    # Nextcloud, a self-hosted Radicale, by putting its URL here.
     "url": "https://caldav.icloud.com/",
     "username": "",
     "daysBack": 31,
@@ -41,7 +41,7 @@ DEFAULTS = {
     # display names to keep.
     "calendars": [],
     # Subscribed calendars (webcal:// or https://….ics). iCloud never stores
-    # these — the phone keeps only the URL and fetches the source itself — so
+    # these. The phone keeps only the URL and fetches the source itself, so
     # they are pulled from the same place the phone pulls them from.
     "subscriptions": [],
 }
@@ -91,9 +91,9 @@ def keyring_lookup(username):
     except FileNotFoundError:
         raise RuntimeError("secret-tool is not installed (package: libsecret)")
     except subprocess.TimeoutExpired:
-        raise RuntimeError("the keyring did not answer — is it unlocked?")
+        raise RuntimeError("the keyring did not answer. Is it unlocked?")
     if result.returncode != 0 or not result.stdout:
-        raise RuntimeError("no password in the keyring — sign in again")
+        raise RuntimeError("no password in the keyring. Sign in again")
     return result.stdout.strip("\n")
 
 
@@ -154,7 +154,7 @@ def normalise_hex(value):
 def calendar_color(calendar):
     """The colour the calendar has in Apple's own apps; absence is fine.
 
-    get_properties wants a property element, not the bare namespaced string —
+    get_properties wants a property element, not the bare namespaced string.
     handing it a string raises rather than returning nothing.
     """
     try:
@@ -346,7 +346,7 @@ def cmd_check():
 def friendly_error(exc):
     detail = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
     if any(k in detail for k in ("401", "Unauthorized", "Forbidden")):
-        return ("the server rejected the sign-in — check the Apple ID, and note that "
+        return ("the server rejected the sign-in. Check the Apple ID, and note that "
                 "this needs an app-specific password, not your usual one")
     return detail
 

@@ -2,7 +2,7 @@
 // which days carry something, and turning a stored event into the one line
 // the panel prints for it.
 //
-// Kept locale- and Qt-free for the same reason Model.js is — this is plain
+// Kept locale- and Qt-free for the same reason Model.js is. This is plain
 // date arithmetic, and it should stay testable without a shell around it.
 
 var MS_PER_DAY = 86400000
@@ -34,7 +34,7 @@ function parseCache(text) {
   var empty = {
     status: "empty", error: "", syncedAt: "", events: [],
     // The helper states these on every write so the panel can tell "never
-    // signed in" from "packages missing" from "the network is down" — each
+    // signed in" from "packages missing" from "the network is down", and each
     // has a different next step for whoever is looking at it.
     configured: false, signedIn: false, missing: []
   }
@@ -161,7 +161,7 @@ function colorMap(events) {
 // meetings and one dinner would otherwise read as purely work, so when the
 // cap would repeat a calendar over a day that has something else on it, the
 // trailing dots give way to the ones that would go unmentioned. The number of
-// dots never changes — only which calendars fill them.
+// dots never changes, only which calendars fill them.
 function dotColors(colors, limit) {
   var all = colors || []
   var cap = Math.max(0, Number(limit) || 0)
@@ -181,7 +181,7 @@ function dotColors(colors, limit) {
   return shown
 }
 
-// A small fixed palette for recolouring a calendar by hand — mostly for
+// A small fixed palette for recolouring a calendar by hand, mostly for
 // subscribed feeds, which often ship no colour at all or one that clashes
 // with everything else on the day. Mid-toned on purpose: each of these reads
 // against a dark panel and a light one without the legibility guard below
@@ -195,7 +195,7 @@ function palette() {
   return PALETTE.slice()
 }
 
-// A URL worth handing to the subscribe helper. Deliberately loose — the
+// A URL worth handing to the subscribe helper. Deliberately loose: the
 // helper and the server do the real validation, and this only exists to stop
 // an empty field or an obvious paste accident from spawning a process.
 function looksLikeCalendarUrl(value) {
@@ -239,7 +239,7 @@ function mixToward(rgb, target, amount) {
 }
 
 // An empty colour means iCloud gave none, and the caller should fall back to
-// the theme accent — signalled by returning "" rather than inventing one.
+// the theme accent, signalled by returning "" rather than inventing one.
 function legibleColor(hex, foregroundIsLight) {
   var rgb = parseHex(hex)
   if (!rgb) return ""
@@ -305,8 +305,8 @@ function eventKey(event) {
   return String(event.uid || "") + "|" + String(event.startMs)
 }
 
-// The full span, for the detail view. The list itself shows only the start —
-// that is what you scan a day by — so this is the half that was left out.
+// The full span, for the detail view. The list itself shows only the start,
+// which is what you scan a day by, so this is the half that was left out.
 function timeRange(event) {
   if (!event) return ""
   if (event.allDay) return "All day"
@@ -350,7 +350,7 @@ function isPast(event, nowMs) {
   return event.endMs <= nowMs
 }
 
-// "3 events", "1 event", "" — the count beside the day heading.
+// "3 events", "1 event", "": the count beside the day heading.
 function summaryLabel(count) {
   var n = Number(count) || 0
   if (n <= 0) return ""
