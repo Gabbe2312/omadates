@@ -224,7 +224,22 @@ Panel {
   // sync leaves the last good calendar on screen, and a day with nothing on
   // it is not a fault.
   readonly property string statusMessage: "Nothing scheduled"
-  readonly property string syncTrouble: root.cacheFailed
+
+  // A failed sync is not news until it has lasted. The first one usually has
+  // not: the shell starts before the machine has a route, so the honest
+  // report at that moment is that the calendar cannot reach iCloud, and it
+  // is about to be wrong. Announcing it teaches you to distrust the line,
+  // which is the one thing it cannot afford — the failures worth saying out
+  // loud are the ones that stay, a password the server no longer accepts or
+  // a feed that has moved.
+  //
+  // So the retry ladder below gets its first three tries in silence, and
+  // only a failure still standing after those says so. What is on screen
+  // meanwhile is the last calendar that arrived, which is the right thing to
+  // be showing either way.
+  readonly property int troubleGrace: 45 * 1000
+  property bool troubleSettled: false
+  readonly property string syncTrouble: root.cacheFailed && root.troubleSettled
     ? (root.cache.error !== "" ? root.cache.error : "Calendar sync failed")
     : ""
 
@@ -1078,8 +1093,23 @@ Panel {
   property int retryDelay: root.retryFloor
 
   // A sync that works resets the ladder, so the next bad patch starts
-  // over at ten seconds rather than wherever the last one gave up.
-  onCacheFailedChanged: if (!root.cacheFailed) root.retryDelay = root.retryFloor
+  // over at five seconds rather than wherever the last one gave up.
+  onCacheFailedChanged: {
+    if (!root.cacheFailed) root.retryDelay = root.retryFloor
+    // Either way the grace starts over: a fresh failure has not earned the
+    // line yet, and one that has just cleared should not leave it behind.
+    root.troubleSettled = false
+  }
+
+  // Repeating, though it only needs to fire once, because a one-shot Timer
+  // clears its own running property, and that assignment breaks the binding
+  // that drives it. Settling stops it on the next evaluation instead.
+  Timer {
+    interval: root.troubleGrace
+    running: root.cacheFailed && !root.troubleSettled
+    repeat: true
+    onTriggered: root.troubleSettled = true
+  }
 
   Timer {
     interval: root.retryDelay
