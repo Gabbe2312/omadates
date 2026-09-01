@@ -1067,8 +1067,13 @@ Panel {
   //      So a failure asks again itself: soon, since the usual cause is a
   //      radio that has not finished associating, then doubling, since the
   //      other causes are a rejected password and a server that is down and
-  //      neither is helped by being asked every ten seconds until morning.
-  readonly property int retryFloor: 10 * 1000
+  //      neither is helped by being asked every five seconds until morning.
+  //
+  //      Five to start with, because an attempt that fails for want of a
+  //      route costs about forty milliseconds and sends nothing: the name
+  //      lookup fails locally. That buys two tries inside the first fifteen
+  //      seconds, which is the window the radio usually comes up in.
+  readonly property int retryFloor: 5 * 1000
   readonly property int retryCeiling: 5 * 60 * 1000
   property int retryDelay: root.retryFloor
 
