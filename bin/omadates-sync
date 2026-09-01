@@ -369,6 +369,14 @@ def edit_cache(change):
     write_cache(cache)
 
 
+def cache_status():
+    """What the panel is currently saying about the last sync."""
+    try:
+        return str(json.loads(CACHE_PATH.read_text()).get("status") or "")
+    except Exception:
+        return ""
+
+
 def cached_colour(name):
     """The colour the calendar list already knows, for an event written now."""
     try:
@@ -670,6 +678,14 @@ def cmd_poll():
     known = read_tokens()
     if fresh and known and all(known.get(k) == v and v != "" for k, v in fresh.items()) \
             and set(known) >= set(fresh):
+        # Nothing moved, but getting an answer at all settles the other
+        # question. If the last sync failed, the panel is still showing that
+        # failure, and a poll that reached the server has just disproved it.
+        # Saying "unchanged" here would leave "no connection" on screen over
+        # a connection that plainly works.
+        if cache_status() == "error":
+            print("omadates-sync: unchanged, clearing stale error")
+            return cmd_sync()
         print("omadates-sync: unchanged")
         return 0
 

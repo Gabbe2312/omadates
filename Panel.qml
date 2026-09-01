@@ -326,8 +326,9 @@ Panel {
   // Opening the panel repeatedly should not hammer iCloud, and the timer is
   // already covering the steady state.
   function requestSync() {
-    if (syncProcess.running || pollProcess.running) return
+    if (syncProcess.running || pollProcess.running) return false
     syncProcess.running = true
+    return true
   }
 
   // Asking whether anything changed costs a fraction of fetching it, so it
@@ -1052,6 +1053,37 @@ Panel {
     repeat: true
     triggeredOnStart: true
     onTriggered: root.requestSync()
+  }
+
+  // ---- Getting back on after a sync that did not land.
+  //      The pass above fires as the shell starts, which at boot is a second
+  //      or two before NetworkManager has a route: the first thing the
+  //      calendar says about a laptop that is about to be online is "no
+  //      connection". Neither timer answers that. The poll keeps quiet when
+  //      it cannot reach the server, by design, and the full pass is a
+  //      quarter of an hour away, so the wrong answer stands for as long as
+  //      it takes someone to notice it is wrong.
+  //
+  //      So a failure asks again itself: soon, since the usual cause is a
+  //      radio that has not finished associating, then doubling, since the
+  //      other causes are a rejected password and a server that is down and
+  //      neither is helped by being asked every ten seconds until morning.
+  readonly property int retryFloor: 10 * 1000
+  readonly property int retryCeiling: 5 * 60 * 1000
+  property int retryDelay: root.retryFloor
+
+  // A sync that works resets the ladder, so the next bad patch starts
+  // over at ten seconds rather than wherever the last one gave up.
+  onCacheFailedChanged: if (!root.cacheFailed) root.retryDelay = root.retryFloor
+
+  Timer {
+    interval: root.retryDelay
+    running: root.cacheFailed
+    repeat: true
+    // Only a retry that actually ran counts towards the backoff: one skipped
+    // because a sync was already in flight has learned nothing.
+    onTriggered: if (root.requestSync())
+      root.retryDelay = Math.min(root.retryDelay * 2, root.retryCeiling)
   }
 
   SystemClock {
