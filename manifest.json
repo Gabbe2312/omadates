@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.gabbe2312.calendar",
   "name": "Omadates",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Gabbe2312",
   "license": "MIT",
   "description": "Apple Calendar in your Omarchy bar. Dots on the days that have something, today's events under the month grid, and a click for the details. Syncs iCloud, any CalDAV server, and webcal subscriptions.",

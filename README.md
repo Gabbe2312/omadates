@@ -198,7 +198,7 @@ always asks, whatever it is set to.
 
 | Key | Meaning |
 |---|---|
-| `url` | CalDAV endpoint. Defaults to iCloud; Fastmail, Nextcloud and Radicale work the same way. |
+| `url` | CalDAV endpoint. Defaults to iCloud; Fastmail, Nextcloud and Radicale work the same way. Must be `https://`. |
 | `username` | Your account. Set by signing in. |
 | `daysBack` / `daysAhead` | How much of the calendar to keep cached. |
 | `calendars` | Only fetch these calendar names. Empty means all of them. |
@@ -221,6 +221,50 @@ Wheelmap. A system with none falls back to a web search.
 It reuses the browser you already have open rather than starting another, and
 brings that window to you if it is sitting on a different workspace. A tab
 opening two desks away is the same as nothing happening.
+
+## What it touches
+
+A calendar plugin reads your diary, holds a password and talks to servers you
+name, so here is the whole of what that means in one place.
+
+**Where it connects.** Your CalDAV server, and the feed URLs you paste.
+Nothing else, ever. Both must be `https://`; `webcal://` is rewritten to it.
+A feed's redirects are followed one at a time and each hop is checked, so a
+feed cannot send the fetch to this machine's own loopback, to the link-local
+range that holds cloud metadata services, or into the network behind your
+router. What comes back is read up to a limit rather than to whatever length
+the far end feels like sending. DNS-based server discovery is off: the
+address is one you already have, and a DNS answer does not get to nominate
+somewhere else to send the password.
+
+**The password.** Straight to your login keyring through `secret-tool`, on
+stdin. Never in a config file, never as a command-line argument, never in the
+process list. It is checked against the server before it is stored, so a typo
+on re-authentication cannot replace a working credential with a broken one.
+
+**On disk.** `~/.config/omarchy/omadates/` and `~/.cache/omarchy/omadates/`
+are `0700`, and the files in them `0600`. Between them they hold your Apple
+ID and the title, place and notes of everything on your calendar, which is
+nobody else's business on a shared machine. Every write goes to a temporary
+file that refuses to be a symlink and is then renamed into place, so the
+panel never reads half a cache and nothing here can be tricked into writing
+through a link somewhere else.
+
+**On screen.** Everything that came off a server is drawn as plain text.
+Titles and places are cut to a line's worth and stripped of control
+characters and the bidirectional overrides that make text render backwards,
+so no event can rearrange the panel or make its title read as something it is
+not.
+
+**Writes.** Creating and deleting events and calendars, and setting a
+calendar's colour, all go to the server. Every destructive action asks twice
+and says what it costs first. A subscribed feed is somebody else's file and
+nothing here can write to one.
+
+**Processes.** The panel runs one helper: the `bin/omadates-sync` beside it.
+Each call has a network timeout, only one of each kind runs at a time, and
+anything still going after forty seconds is stopped and reported rather than
+left holding a connection open for the life of the shell.
 
 ## Removing it
 
