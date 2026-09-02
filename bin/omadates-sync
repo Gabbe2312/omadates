@@ -64,6 +64,26 @@ DESCRIPTION_LIMIT = 600
 # short enough to be an answer rather than a hang.
 NETWORK_TIMEOUT = 25
 
+# State is written 0600 inside 0700 directories. The cache holds the titles,
+# places and notes of everything on the calendar, and the config holds the
+# Apple ID; neither is anyone else's business on a shared machine.
+STATE_MODE = 0o600
+STATE_DIR_MODE = 0o700
+
+# A subscribed feed is a URL somebody pasted, and what comes back is a file a
+# stranger controls. Both ends of that are bounded: how big the file may be,
+# and how many redirects it may send us through.
+MAX_FEED_BYTES = 8 * 1024 * 1024
+MAX_REDIRECTS = 5
+
+# One calendar cannot be allowed to make the panel unusable. Titles are cut to
+# a length a line can hold, and the whole cache to a number of events the shell
+# can lay out without stalling; a feed with a hundred thousand entries in the
+# window is a broken feed, not a busy month.
+SUMMARY_LIMIT = 200
+LOCATION_LIMIT = 200
+MAX_EVENTS = 5000
+
 REQUIREMENTS = [
     ("caldav", "python-caldav"),
     ("icalendar", "python-icalendar"),
@@ -75,13 +95,62 @@ REQUIREMENTS = [
 ]
 
 
+# ---------------------------------------------------------------- state files
+
+def secure_dir(path):
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path, STATE_DIR_MODE)
+    except OSError:
+        pass
+
+
+def write_private(path, text):
+    """Write a state file atomically, privately, and without following a link.
+
+    O_NOFOLLOW on the temporary file means a symlink planted at that name is an
+    error rather than a way to have this process write somewhere else as the
+    user who owns it. os.replace then swaps the finished file into place in one
+    step, which is what keeps the shell's file watcher from ever reading half a
+    cache, and which replaces a symlink at the destination rather than writing
+    through it.
+    """
+    secure_dir(path.parent)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, STATE_MODE)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    os.replace(tmp, path)
+
+
+def read_private(path):
+    """Read a state file this program wrote, refusing to follow a link there."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        return ""
+    with os.fdopen(fd, "r", encoding="utf-8") as handle:
+        return handle.read()
+
+
 # ---------------------------------------------------------------- config
 
 def load_config():
     config = dict(DEFAULTS)
     if CONFIG_PATH.exists():
         try:
-            user = json.loads(CONFIG_PATH.read_text() or "{}")
+            user = json.loads(read_private(CONFIG_PATH) or "{}")
             if isinstance(user, dict):
                 config.update({k: v for k, v in user.items() if v is not None})
         except Exception as exc:
@@ -90,8 +159,7 @@ def load_config():
 
 
 def save_config(config):
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n")
+    write_private(CONFIG_PATH, json.dumps(config, indent=2, ensure_ascii=False) + "\n")
 
 
 # ---------------------------------------------------------------- keyring
@@ -120,13 +188,21 @@ def keyring_store(username, password):
         )
     except FileNotFoundError:
         raise RuntimeError("secret-tool is not installed (package: libsecret)")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("the keyring did not answer. Is it unlocked?")
     if result.returncode != 0:
         raise RuntimeError((result.stderr or "could not write to the keyring").strip())
 
 
 def keyring_clear(username):
-    subprocess.run(["secret-tool", "clear", "service", KEYRING_SERVICE, "account", username],
-                   capture_output=True, text=True, timeout=15)
+    try:
+        subprocess.run(["secret-tool", "clear", "service", KEYRING_SERVICE, "account", username],
+                       capture_output=True, text=True, timeout=15)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        # Signing out has to work whether or not the keyring answers. The
+        # config forgets the account either way, and a password left behind
+        # unlocks nothing on its own.
+        pass
 
 
 # ---------------------------------------------------------------- helpers
@@ -146,10 +222,46 @@ def as_local_datetime(value, tz):
     return None, False
 
 
+# Kept because they are part of ordinary text: the joiner that holds a
+# multi-part emoji together, and the selectors that choose how one is drawn.
+KEPT_FORMAT_CHARS = "\u200d\ufe0e\ufe0f"
+
+
+def strip_controls(value, keep=""):
+    """Drop what has no business being drawn as a line of a panel.
+
+    Control characters break the layout — a newline in a title turns one row
+    into two — and the bidirectional overrides are worse than that: they
+    reverse the direction of everything after them, which is how a title can be
+    made to read as something other than what it says. Neither ever appears in
+    a real appointment, so both are removed rather than rendered.
+    """
+    import unicodedata
+    out = []
+    for char in str(value or ""):
+        if char in keep or char in KEPT_FORMAT_CHARS:
+            out.append(char)
+            continue
+        category = unicodedata.category(char)
+        if category[0] == "C" or category in ("Zl", "Zp"):
+            continue
+        out.append(char)
+    return "".join(out)
+
+
+def clean_line(value, limit):
+    """One line of server-supplied text, cut to something a row can hold."""
+    text = strip_controls(value).strip()
+    if len(text) > limit:
+        text = text[:limit].rstrip() + "…"
+    return text
+
+
 def clean_description(value):
     if value is None:
         return ""
-    text = str(value).replace("\r\n", "\n").replace("\r", "\n").strip()
+    text = strip_controls(str(value).replace("\r\n", "\n").replace("\r", "\n"),
+                          keep="\n").strip()
     while "\n\n\n" in text:
         text = text.replace("\n\n\n", "\n\n")
     if len(text) > DESCRIPTION_LIMIT:
@@ -164,6 +276,43 @@ def normalise_hex(value):
 
 
 # ---------------------------------------------------------------- caldav
+
+def require_https(url, what):
+    """Refuse to put credentials, or a calendar, on an unencrypted connection.
+
+    The account's password goes out on every CalDAV request, and what comes
+    back is the whole diary. Over http both are readable by anything between
+    here and the server, and a redirect on that connection can be rewritten by
+    the same party. There is no version of this worth supporting quietly, so
+    the address is checked before anything is sent rather than after.
+    """
+    text = str(url or "").strip()
+    if not text.lower().startswith("https://"):
+        raise RuntimeError(f"{what} must be an https:// address")
+    return text
+
+
+def dav_client(config, username, password):
+    """The only place a CalDAV connection is opened.
+
+    ssl_verify_cert is the default, said out loud because it is the line that
+    matters most here. RFC 6764 discovery is off: the address is one this
+    machine already holds, so letting a DNS answer nominate some other server
+    to send the password to buys nothing and risks exactly that.
+    """
+    import caldav
+    return caldav.DAVClient(
+        url=require_https(config.get("url"), "the calendar server address"),
+        username=username, password=password,
+        timeout=NETWORK_TIMEOUT, ssl_verify_cert=True, enable_rfc6764=False,
+    )
+
+
+def account_calendars(config, username):
+    """Sign in and list the account's calendars, or raise something readable."""
+    password = keyring_lookup(username)
+    return dav_client(config, username, password).principal().calendars()
+
 
 def calendar_color(calendar):
     """The colour the calendar has in Apple's own apps; absence is fine.
@@ -255,9 +404,9 @@ def build_event(sub, tz, name, color, subscribed):
         # deleting by UID takes the whole series. The panel has to be able
         # to say so before it asks.
         "recurring": bool(sub.get("RRULE") or sub.get("RECURRENCE-ID")),
-        "summary": str(sub.get("SUMMARY", "") or "").strip() or "(no title)",
+        "summary": clean_line(sub.get("SUMMARY", ""), SUMMARY_LIMIT) or "(no title)",
         "description": clean_description(sub.get("DESCRIPTION")),
-        "location": str(sub.get("LOCATION", "") or "").strip(),
+        "location": clean_line(sub.get("LOCATION", ""), LOCATION_LIMIT),
         "start": start_iso,
         "end": end_iso or start_iso,
         "allDay": all_day,
@@ -269,26 +418,136 @@ def build_event(sub, tz, name, color, subscribed):
 
 # ---------------------------------------------------------------- feeds
 
+def feed_address(url):
+    """The https address a subscription actually points at.
+
+    webcal is plain https wearing a scheme that tells the OS to subscribe
+    rather than download, so it is rewritten and then held to the same rule as
+    everything else.
+    """
+    text = str(url or "").strip()
+    if text.lower().startswith("webcal://"):
+        text = "https://" + text[len("webcal://"):]
+    return require_https(text, "a calendar feed")
+
+
+def check_destination(url, allow_private):
+    """Refuse to fetch from an address that is not the internet.
+
+    A pasted feed URL is the user's own choice, and a calendar served off the
+    machine next to them is a fair thing to want, so a private address is
+    allowed where they typed one. A redirect is not their choice: it is the
+    remote end naming somewhere else to go, and somewhere else must not mean
+    this machine's own loopback, the link-local range that holds cloud
+    metadata services, or the network behind the router.
+
+    Resolving here and letting the HTTP library resolve again leaves a window
+    where a name could answer differently the second time. Closing it properly
+    means pinning the connection to the address checked, which cannot be done
+    without taking over certificate verification as well. This is the check
+    that stops a redirect from walking into the LAN, not a guarantee against a
+    DNS server actively lying in the space of one request.
+    """
+    import ipaddress
+    import socket
+    import urllib.parse
+
+    parsed = urllib.parse.urlsplit(url)
+    host = parsed.hostname
+    if not host:
+        raise RuntimeError("that address has no host in it")
+
+    try:
+        infos = socket.getaddrinfo(host, parsed.port or 443, proto=socket.IPPROTO_TCP)
+    except OSError:
+        raise RuntimeError("no connection")
+
+    for info in infos:
+        address = ipaddress.ip_address(info[4][0])
+        # ::ffff:127.0.0.1 is the loopback wearing a v6 address, and answers
+        # False to is_loopback in that form. Unwrap before asking.
+        mapped = getattr(address, "ipv4_mapped", None)
+        if mapped is not None:
+            address = mapped
+        if address.is_loopback or address.is_link_local or address.is_multicast \
+                or address.is_reserved or address.is_unspecified:
+            raise RuntimeError("that address is not on the internet")
+        if not allow_private and address.is_private:
+            raise RuntimeError("that feed redirected to a private address")
+    return url
+
+
+def read_capped(response):
+    """The feed's bytes, up to a limit, rather than whatever it decides to send.
+
+    Without this a feed that answers with an endless stream takes the machine's
+    memory with it, and nothing about the request says how much is coming: a
+    Content-Length is a claim, not a promise, so it is checked when offered and
+    the actual read is counted regardless.
+    """
+    declared = response.headers.get("Content-Length")
+    if declared and declared.isdigit() and int(declared) > MAX_FEED_BYTES:
+        raise RuntimeError("that calendar is too large to read")
+
+    chunks, total = [], 0
+    for chunk in response.iter_content(64 * 1024):
+        total += len(chunk)
+        if total > MAX_FEED_BYTES:
+            raise RuntimeError("that calendar is too large to read")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def fetch_feed(url):
+    """Fetch a feed, following redirects one at a time and checking each hop.
+
+    requests would follow them on its own, but then the only address ever
+    checked is the one that was typed, and the check that matters is the one on
+    the address actually contacted.
+    """
+    import requests
+
+    target = check_destination(feed_address(url), allow_private=True)
+    session = requests.Session()
+    # No .netrc, no proxy picked up from the environment: this request carries
+    # no credentials and should not acquire any on the way out.
+    session.trust_env = False
+    try:
+        for _ in range(MAX_REDIRECTS + 1):
+            response = session.get(target, timeout=NETWORK_TIMEOUT, stream=True,
+                                   allow_redirects=False,
+                                   headers={"User-Agent": "omadates"})
+            if response.is_redirect or response.is_permanent_redirect:
+                location = response.headers.get("Location", "")
+                response.close()
+                if not location:
+                    raise RuntimeError("the server redirected to nowhere")
+                target = check_destination(
+                    feed_address(requests.compat.urljoin(target, location)),
+                    allow_private=False)
+                continue
+            with response:
+                response.raise_for_status()
+                # The raw bytes, not response.text: requests falls back to
+                # ISO-8859-1 for text/* without a declared charset, which turns
+                # every accented letter into mojibake. RFC 5545 says iCalendar
+                # is UTF-8, and icalendar decodes bytes on that assumption.
+                return read_capped(response)
+        raise RuntimeError("that calendar redirected too many times")
+    finally:
+        session.close()
+
+
 def fetch_subscription(entry, start, end, tz):
     """One subscribed .ics feed, expanded over the same window as CalDAV."""
     import icalendar
     import recurring_ical_events
-    import requests
 
     url = str(entry.get("url") or "").strip()
     if not url:
-        return [], ""
-    # webcal is plain https with a scheme that tells the OS to subscribe.
-    if url.startswith("webcal://"):
-        url = "https://" + url[len("webcal://"):]
+        return [], "", ""
 
-    response = requests.get(url, timeout=30, headers={"User-Agent": "omadates"})
-    response.raise_for_status()
-    # The raw bytes, not response.text: requests falls back to ISO-8859-1 for
-    # text/* without a declared charset, which turns every accented letter into
-    # mojibake. RFC 5545 says iCalendar is UTF-8, and icalendar decodes bytes
-    # on that assumption.
-    calendar = icalendar.Calendar.from_ical(response.content)
+    calendar = icalendar.Calendar.from_ical(fetch_feed(url))
 
     name = (str(entry.get("name") or "").strip()
             or str(calendar.get("X-WR-CALNAME", "") or "").strip()
@@ -300,7 +559,9 @@ def fetch_subscription(entry, start, end, tz):
         built = build_event(sub, tz, name, color, subscribed=True)
         if built:
             events.append(built)
-    return events, name
+        if len(events) >= MAX_EVENTS:
+            break
+    return events, name, color
 
 
 # ---------------------------------------------------------------- cache
@@ -322,11 +583,7 @@ def cache_state():
 def write_cache(payload):
     for key, value in cache_state().items():
         payload.setdefault(key, value)
-    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = CACHE_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
-    # Atomic, so the shell's file watcher never reads a half-written cache.
-    os.replace(tmp, CACHE_PATH)
+    write_private(CACHE_PATH, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
 
 
 # What a failed run hands forward from the last good one. Events were always
@@ -338,7 +595,7 @@ CARRIED_FORWARD = ("events", "syncedAt", "calendars")
 
 def last_good():
     try:
-        old = json.loads(CACHE_PATH.read_text())
+        old = json.loads(read_private(CACHE_PATH))
     except Exception:
         return {}
     if not isinstance(old, dict):
@@ -358,7 +615,7 @@ def edit_cache(change):
     other leaves the two disagreeing about what colour a calendar is.
     """
     try:
-        cache = json.loads(CACHE_PATH.read_text())
+        cache = json.loads(read_private(CACHE_PATH))
     except Exception:
         return
     if not isinstance(cache, dict):
@@ -372,7 +629,7 @@ def edit_cache(change):
 def cache_status():
     """What the panel is currently saying about the last sync."""
     try:
-        return str(json.loads(CACHE_PATH.read_text()).get("status") or "")
+        return str(json.loads(read_private(CACHE_PATH)).get("status") or "")
     except Exception:
         return ""
 
@@ -380,7 +637,7 @@ def cache_status():
 def cached_colour(name):
     """The colour the calendar list already knows, for an event written now."""
     try:
-        cache = json.loads(CACHE_PATH.read_text())
+        cache = json.loads(read_private(CACHE_PATH))
         for entry in cache.get("calendars", []):
             if entry.get("name") == name:
                 return entry.get("color", "")
@@ -504,12 +761,8 @@ def cmd_create(args):
         print(calendar.to_ical().decode())
         return 0
 
-    import caldav
     try:
-        password = keyring_lookup(username)
-        client = caldav.DAVClient(url=str(config["url"]), username=username,
-                                 password=password, timeout=NETWORK_TIMEOUT)
-        calendars = client.principal().calendars()
+        calendars = account_calendars(config, username)
     except Exception as exc:
         return fail(friendly_error(exc))
 
@@ -557,12 +810,8 @@ def cmd_delete(args):
     if not username:
         return fail("not signed in")
 
-    import caldav
     try:
-        password = keyring_lookup(username)
-        client = caldav.DAVClient(url=str(config["url"]), username=username,
-                                 password=password, timeout=NETWORK_TIMEOUT)
-        calendars = client.principal().calendars()
+        calendars = account_calendars(config, username)
     except Exception as exc:
         return fail(friendly_error(exc))
 
@@ -620,7 +869,7 @@ def cmd_delete(args):
 
 def read_tokens():
     try:
-        loaded = json.loads(TOKENS_PATH.read_text())
+        loaded = json.loads(read_private(TOKENS_PATH))
         return loaded if isinstance(loaded, dict) else {}
     except Exception:
         return {}
@@ -628,8 +877,7 @@ def read_tokens():
 
 def write_tokens(tokens):
     try:
-        TOKENS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        TOKENS_PATH.write_text(json.dumps(tokens, indent=2))
+        write_private(TOKENS_PATH, json.dumps(tokens, indent=2))
     except Exception:
         pass
 
@@ -663,11 +911,7 @@ def cmd_poll():
         return 0
 
     try:
-        import caldav
-        password = keyring_lookup(username)
-        client = caldav.DAVClient(url=str(config["url"]), username=username,
-                                  password=password, timeout=NETWORK_TIMEOUT)
-        calendars = client.principal().calendars()
+        calendars = account_calendars(config, username)
     except Exception:
         # A poll that cannot reach the server says nothing at all: the cache
         # keeps its last good answer, and the periodic full sync will report
@@ -676,8 +920,10 @@ def cmd_poll():
 
     fresh = collection_tokens(calendars)
     known = read_tokens()
-    if fresh and known and all(known.get(k) == v and v != "" for k, v in fresh.items()) \
-            and set(known) >= set(fresh):
+    # Equal sets, not a superset: a calendar that is no longer there is a
+    # change, and comparing only the ones that remain would miss it.
+    if fresh and known and set(known) == set(fresh) \
+            and all(known.get(k) == v and v != "" for k, v in fresh.items()):
         # Nothing moved, but getting an answer at all settles the other
         # question. If the last sync failed, the panel is still showing that
         # failure, and a poll that reached the server has just disproved it.
@@ -716,13 +962,10 @@ def cmd_newcalendar(args):
     if not username:
         return fail("not signed in")
 
-    import caldav
     from caldav.elements import ical
     try:
         password = keyring_lookup(username)
-        client = caldav.DAVClient(url=str(config["url"]), username=username,
-                                  password=password, timeout=NETWORK_TIMEOUT)
-        principal = client.principal()
+        principal = dav_client(config, username, password).principal()
     except Exception as exc:
         return fail(friendly_error(exc))
 
@@ -780,12 +1023,8 @@ def cmd_deletecalendar(args):
     if not username:
         return fail("not signed in")
 
-    import caldav
     try:
-        password = keyring_lookup(username)
-        client = caldav.DAVClient(url=str(config["url"]), username=username,
-                                  password=password, timeout=NETWORK_TIMEOUT)
-        calendars = client.principal().calendars()
+        calendars = account_calendars(config, username)
     except Exception as exc:
         return fail(friendly_error(exc))
 
@@ -830,13 +1069,9 @@ def cmd_colour(args):
     if not username:
         return fail("not signed in")
 
-    import caldav
     from caldav.elements import ical
     try:
-        password = keyring_lookup(username)
-        client = caldav.DAVClient(url=str(config["url"]), username=username,
-                                  password=password, timeout=NETWORK_TIMEOUT)
-        calendars = client.principal().calendars()
+        calendars = account_calendars(config, username)
     except Exception as exc:
         return fail(friendly_error(exc))
 
@@ -1040,9 +1275,7 @@ def verify_credentials(url, username, password):
     replaces a working password with a broken one, and the only symptom is a
     calendar that quietly stops updating.
     """
-    import caldav
-    caldav.DAVClient(url=url, username=username, password=password,
-                     timeout=NETWORK_TIMEOUT).principal().calendars()
+    dav_client({"url": url}, username, password).principal().calendars()
 
 
 def cmd_login(args):
@@ -1092,8 +1325,12 @@ def cmd_subscribe(args):
         return fail("subscribe needs a URL")
     url = args[0].strip()
     name = args[1].strip() if len(args) > 1 else ""
-    if not url.startswith(("webcal://", "http://", "https://")):
-        return fail("that does not look like a calendar URL")
+    # Checked now rather than at the first fetch, so a bad address is refused
+    # while the person who typed it is still looking at it.
+    try:
+        check_destination(feed_address(url), allow_private=True)
+    except RuntimeError as exc:
+        return fail(str(exc))
 
     config = load_config()
     subs = config.get("subscriptions") or []
@@ -1153,12 +1390,8 @@ def cmd_sync():
     calendars_meta = []
 
     if username:
-        import caldav
         try:
-            password = keyring_lookup(username)
-            client = caldav.DAVClient(url=str(config["url"]), username=username,
-                                 password=password, timeout=NETWORK_TIMEOUT)
-            calendars = client.principal().calendars()
+            calendars = account_calendars(config, username)
         except Exception as exc:
             return fail(friendly_error(exc))
 
@@ -1180,12 +1413,15 @@ def cmd_sync():
     for entry in subscriptions:
         label = str(entry.get("name") or entry.get("url") or "subscription")
         try:
-            fetched, name = fetch_subscription(entry, start, end, tz)
+            fetched, name, colour = fetch_subscription(entry, start, end, tz)
             events.extend(fetched)
             if name:
                 calendars_meta.append({
                     "name": name,
-                    "color": fetched[0]["color"] if fetched else "",
+                    # From the feed's own header, not from the first event in
+                    # it: a feed with nothing in this month would otherwise
+                    # have no colour until something landed in the window.
+                    "color": colour,
                     "writable": False, "subscribed": True,
                     # Kept so the panel can say which subscription to drop:
                     # the name shown is whatever the feed calls itself, which
@@ -1202,6 +1438,12 @@ def cmd_sync():
         write_tokens(collection_tokens(calendars))
 
     events.sort(key=lambda e: (e["start"], e["summary"]))
+    if len(events) > MAX_EVENTS:
+        # The window is four months wide, so this is a feed misbehaving rather
+        # than a busy diary. Better a truncated month than a shell that stalls
+        # laying out a hundred thousand rows.
+        problems.append(f"showing the first {MAX_EVENTS} events of {len(events)}")
+        events = events[:MAX_EVENTS]
     write_cache({
         "status": "ok",
         "error": "; ".join(problems),
@@ -1214,7 +1456,26 @@ def cmd_sync():
     return 0
 
 
+def tighten_existing_state():
+    """Take the private files private, including ones written before this.
+
+    Every write from here on makes them 0600 inside a 0700 directory, but a
+    machine that ran an earlier version already has a world-readable cache
+    sitting there holding the title of every appointment. Nothing but this
+    line would ever narrow it.
+    """
+    for path in (CONFIG_PATH, CACHE_PATH, TOKENS_PATH):
+        try:
+            if path.parent.is_dir():
+                os.chmod(path.parent, STATE_DIR_MODE)
+            if path.is_file():
+                os.chmod(path, STATE_MODE)
+        except OSError:
+            pass
+
+
 def main(argv):
+    tighten_existing_state()
     command = argv[0] if argv else "sync"
     rest = argv[1:]
     if command in ("-h", "--help", "help"):
