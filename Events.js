@@ -30,6 +30,32 @@ function parseTime(value) {
 
 // ---- Cache shape. Anything malformed reads as "no events, with a reason",
 //      which is what the panel wants to print anyway.
+// The helper already bounds all three of these, and bounds them again here
+// because this file's input is a file on disk rather than the helper: a cache
+// that has been edited, or left behind by an older version, still has to lay
+// out in a panel a few hundred pixels wide.
+var SUMMARY_LIMIT = 200
+var LOCATION_LIMIT = 200
+var DESCRIPTION_LIMIT = 600
+var MAX_EVENTS = 5000
+
+// Anything that would break a row: control characters, and the bidirectional
+// overrides that make the rest of a line render backwards.
+function oneLine(value, limit) {
+  var text = String(value || "")
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, "")
+    .replace(/^\s+|\s+$/g, "")
+  return text.length > limit ? text.slice(0, limit) + "…" : text
+}
+
+function safeColor(value) {
+  // Only ever a hex triple. A colour is assigned straight to a QML colour
+  // property, and anything else there is a warning on the console and a
+  // component that draws in the wrong colour or not at all.
+  var text = String(value || "").replace(/^\s+|\s+$/g, "")
+  return /^#[0-9a-fA-F]{6}$/.test(text) ? text : ""
+}
+
 function parseCache(text) {
   var empty = {
     status: "empty", error: "", syncedAt: "", events: [],
@@ -51,7 +77,7 @@ function parseCache(text) {
 
   var list = parsed.events instanceof Array ? parsed.events : []
   var events = []
-  for (var i = 0; i < list.length; i++) {
+  for (var i = 0; i < list.length && events.length < MAX_EVENTS; i++) {
     var normalized = normalize(list[i])
     if (normalized) events.push(normalized)
   }
@@ -59,14 +85,36 @@ function parseCache(text) {
 
   return {
     status: String(parsed.status || "ok"),
-    error: String(parsed.error || ""),
+    error: oneLine(parsed.error, 240),
     syncedAt: String(parsed.syncedAt || ""),
     configured: parsed.configured === true,
-    calendars: parsed.calendars instanceof Array ? parsed.calendars : [],
+    calendars: normalizeCalendars(parsed.calendars),
     signedIn: parsed.signedIn === true,
     missing: parsed.missing instanceof Array ? parsed.missing : [],
     events: events
   }
+}
+
+// The calendar list is drawn as chips with a coloured dot, and both halves of
+// that come off a server: the name is whatever it is called there, the colour
+// whatever it is set to. Held to the same shape as everything else.
+function normalizeCalendars(list) {
+  var out = []
+  if (!(list instanceof Array)) return out
+  for (var i = 0; i < list.length; i++) {
+    var entry = list[i]
+    if (!entry || typeof entry !== "object") continue
+    var name = oneLine(entry.name, SUMMARY_LIMIT)
+    if (name === "") continue
+    out.push({
+      name: name,
+      color: safeColor(entry.color),
+      writable: entry.writable === true,
+      subscribed: entry.subscribed === true,
+      url: String(entry.url || "")
+    })
+  }
+  return out
 }
 
 function normalize(entry) {
@@ -81,13 +129,18 @@ function normalize(entry) {
   var start = new Date(startMs)
   return {
     uid: String(entry.uid || ""),
-    summary: String(entry.summary || "").replace(/^\s+|\s+$/g, "") || "(no title)",
-    description: String(entry.description || "").replace(/^\s+|\s+$/g, ""),
+    summary: oneLine(entry.summary, SUMMARY_LIMIT) || "(no title)",
+    // Notes keep their line breaks; the rest of what a control character can
+    // do to a layout, they do not.
+    description: String(entry.description || "")
+      .replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, "")
+      .replace(/^\s+|\s+$/g, "")
+      .slice(0, DESCRIPTION_LIMIT),
     recurring: entry.recurring === true,
     subscribed: entry.subscribed === true,
-    location: String(entry.location || "").replace(/^\s+|\s+$/g, ""),
-    calendar: String(entry.calendar || ""),
-    color: String(entry.color || ""),
+    location: oneLine(entry.location, LOCATION_LIMIT),
+    calendar: oneLine(entry.calendar, SUMMARY_LIMIT),
+    color: safeColor(entry.color),
     allDay: entry.allDay === true,
     startMs: startMs,
     endMs: endMs,

@@ -426,6 +426,7 @@ Panel {
   function setCalendarColor(name, hex) {
     var key = String(name || "")
     if (key === "") return
+    if (colourProcess.running) return
 
     // A calendar the account owns keeps its colour on the server, where every
     // device reads it. Setting it here sets it on the phone, so a local
@@ -476,6 +477,7 @@ Panel {
       root.signInError = "Both fields are needed"
       return
     }
+    if (loginProcess.running) return
     root.signInError = ""
     root.pendingPassword = secret
     root.signingIn = true
@@ -489,12 +491,14 @@ Panel {
   }
 
   function signOut() {
+    if (logoutProcess.running) return
     logoutProcess.command = root.syncCommand.concat(["logout"])
     logoutProcess.running = true
   }
 
   function deleteCalendar() {
     if (!root.editedCalendar) return
+    if (deleteCalendarProcess.running) return
     root.calendarDeleteArmed = false
     root.deletingCalendar = true
     root.pendingColour = JSON.stringify({
@@ -536,6 +540,7 @@ Panel {
   function openMap(location) {
     var place = String(location || "").replace(/^\s+|\s+$/g, "")
     if (place === "") return
+    if (mapProcess.running) return
     mapProcess.command = root.syncCommand.concat(["map", place])
     mapProcess.running = true
   }
@@ -601,6 +606,7 @@ Panel {
         : root.selectedKey) + "T" + to
     }
 
+    if (createProcess.running) return
     root.composeError = ""
     root.creating = true
     root.pendingPayload = JSON.stringify(payload)
@@ -614,21 +620,42 @@ Panel {
   // The helper has its own network timeout, but a process can die in ways
   // that never reach onExited. Without this the button would sit on
   // "Creating…" until the shell was restarted, which is what happened.
+  //
+  // Every state that a helper can leave stuck belongs in the condition below,
+  // signing in and subscribing included: those two were missing, and a hung
+  // one of either left the panel saying it was still working with nothing
+  // ever coming back to say otherwise.
   Timer {
     id: writeWatchdog
     interval: 40000
     repeat: false
     running: root.creating || root.deleting || root.colouring
       || root.makingCalendar || root.deletingCalendar
+      || root.signingIn || root.subscribing
     onTriggered: {
+      // Clearing the flag only stops the panel waiting. The process is what
+      // is actually stuck, and left alone it holds a connection open for as
+      // long as the shell runs, so it is asked to stop as well.
+      var stuck = [createProcess, deleteProcess, colourProcess, newCalendarProcess,
+                   deleteCalendarProcess, loginProcess, subscribeProcess]
+      for (var i = 0; i < stuck.length; i++) {
+        if (stuck[i].running) stuck[i].signal(15)
+      }
       if (root.creating) root.composeError = "That took too long. Nothing was saved as far as this knows"
       if (root.colouring) root.colourError = "That took too long"
       if (root.makingCalendar) root.subscribeError = "That took too long"
+      if (root.subscribing) root.subscribeError = "That took too long"
+      if (root.signingIn) root.signInError = "That took too long. Check the connection"
+      root.pendingPassword = ""
+      root.pendingPayload = ""
+      root.pendingColour = ""
       root.makingCalendar = false
       root.deletingCalendar = false
       root.creating = false
       root.deleting = false
       root.colouring = false
+      root.signingIn = false
+      root.subscribing = false
       calendarCache.reload()
     }
   }
@@ -660,6 +687,7 @@ Panel {
       root.deleteArmed = key
       return
     }
+    if (deleteProcess.running) return
     root.deleteArmed = ""
     root.deleting = true
     // The start goes along so the helper can look in the right few days:
@@ -715,6 +743,7 @@ Panel {
       root.subscribeError = "A calendar needs a name"
       return
     }
+    if (newCalendarProcess.running) return
     root.subscribeError = ""
     root.makingCalendar = true
     root.pendingColour = JSON.stringify({ name: name, color: root.newCalendarColour })
@@ -731,6 +760,7 @@ Panel {
       root.subscribeError = "That does not look like a calendar URL"
       return
     }
+    if (subscribeProcess.running) return
     root.subscribeError = ""
     root.subscribing = true
     subscribeProcess.command = root.syncCommand.concat(["subscribe", url])
@@ -1195,6 +1225,8 @@ Panel {
               spacing: Style.space(22)
 
               Text {
+                textFormat: Text.PlainText
+
                 // Baseline-aligned, not center-aligned: "July 26" carries a
                 // descender, so centering the two boxes leaves the icon
                 // sitting visibly low against the digits.
@@ -1212,6 +1244,7 @@ Panel {
 
               Text {
                 id: heroDate
+                textFormat: Text.PlainText
                 anchors.verticalCenter: parent.verticalCenter
                 text: Qt.formatDate(root.today, "MMMM d")
                 color: heroMouse.containsMouse
@@ -1304,6 +1337,7 @@ Panel {
                 spacing: Style.space(10)
 
                 Text {
+                  textFormat: Text.PlainText
                   anchors.verticalCenter: parent.verticalCenter
                   text: "BORN"
                   color: Qt.darker(root.contentForeground, 1.5)
@@ -1325,6 +1359,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   anchors.verticalCenter: parent.verticalCenter
                   anchors.verticalCenterOffset: 0
                   leftPadding: Style.space(6)
@@ -1350,6 +1385,7 @@ Panel {
 
               Text {
                 id: yearLabel
+                textFormat: Text.PlainText
                 visible: !root.editingLife
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
@@ -1362,6 +1398,7 @@ Panel {
 
               Text {
                 id: yearPercent
+                textFormat: Text.PlainText
                 visible: !root.editingLife
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
@@ -1411,6 +1448,7 @@ Panel {
 
               Text {
                 id: lifeLabel
+                textFormat: Text.PlainText
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
                 text: "LIFE"
@@ -1422,6 +1460,7 @@ Panel {
 
               Text {
                 id: lifePercent
+                textFormat: Text.PlainText
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 text: root.lifeDonePercent + "%"
@@ -1510,6 +1549,7 @@ Panel {
                     : "transparent"
 
                   Text {
+                    textFormat: Text.PlainText
                     anchors.centerIn: parent
                     text: "W"
                     color: weekStartMouse.containsMouse
@@ -1545,6 +1585,7 @@ Panel {
                   model: root.weekdays
 
                   Text {
+                    textFormat: Text.PlainText
                     required property var modelData
                     width: root.cellWidth
                     height: Style.space(16)
@@ -1568,6 +1609,7 @@ Panel {
                   spacing: root.cellSpacing
 
                   Text {
+                    textFormat: Text.PlainText
                     width: root.weekColumnWidth
                     height: root.cellHeight
                     horizontalAlignment: Text.AlignHCenter
@@ -1611,6 +1653,7 @@ Panel {
 
                       Text {
                         id: dayNumber
+                        textFormat: Text.PlainText
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.verticalCenterOffset: -root.dotRailOffset
@@ -1696,6 +1739,7 @@ Panel {
 
               Text {
                 id: monthLabel
+                textFormat: Text.PlainText
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.verticalCenter: parent.verticalCenter
                 // Fixed width so the chevrons hold still between a
@@ -1766,6 +1810,7 @@ Panel {
 
                 Text {
                   id: eventsHeading
+                  textFormat: Text.PlainText
                   anchors.left: parent.left
                   anchors.verticalCenter: parent.verticalCenter
                   // "TODAY" rather than the date, because that is the one
@@ -1780,6 +1825,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   anchors.right: parent.right
                   anchors.verticalCenter: parent.verticalCenter
                   text: Events.summaryLabel(root.selectedEvents.length)
@@ -1841,6 +1887,7 @@ Panel {
 
                   Text {
                     id: eventTime
+                    textFormat: Text.PlainText
                     anchors.left: parent.left
                     // Sitting on the title's baseline rather than its box:
                     // the two run at different sizes, and matching the boxes
@@ -1885,6 +1932,7 @@ Panel {
 
                     Text {
                       id: eventTitle
+                      textFormat: Text.PlainText
                       width: parent.width
                       text: eventRow.modelData.summary
                       color: root.contentForeground
@@ -1899,6 +1947,7 @@ Panel {
 
                     Text {
                       id: eventLocation
+                      textFormat: Text.PlainText
                       width: parent.width
                       visible: eventRow.modelData.location !== ""
                       text: eventRow.modelData.location
@@ -1941,6 +1990,7 @@ Panel {
                       spacing: Style.space(2)
 
                       Text {
+                        textFormat: Text.PlainText
                         width: parent.width
                         text: Events.timeRange(eventRow.modelData)
                           + (Events.spansDays(eventRow.modelData)
@@ -1953,6 +2003,7 @@ Panel {
                       }
 
                       Text {
+                        textFormat: Text.PlainText
                         width: parent.width
                         text: root.displayName(eventRow.modelData.calendar)
                         color: eventRow.tint
@@ -1962,6 +2013,7 @@ Panel {
                       }
 
                       Text {
+                        textFormat: Text.PlainText
                         width: parent.width
                         visible: eventRow.modelData.description !== ""
                         topPadding: visible ? Style.space(3) : 0
@@ -1987,6 +2039,7 @@ Panel {
                         // UID cannot take anything less.
                         Text {
                           id: deleteAction
+                          textFormat: Text.PlainText
                           anchors.right: parent.right
                           anchors.bottom: parent.bottom
                           text: root.deleting
@@ -2039,6 +2092,7 @@ Panel {
                 spacing: Style.space(3)
 
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   text: "Missing packages"
                   color: Qt.darker(root.contentForeground, 1.3)
@@ -2047,6 +2101,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   text: "omarchy pkg add " + root.missingPackages.join(" ")
                   color: Qt.darker(root.contentForeground, 1.8)
@@ -2070,6 +2125,7 @@ Panel {
                 // hand before there is anything to type, so instructions
                 // underneath arrive a step too late.
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   text: "CONNECT ICLOUD"
                   color: Qt.darker(root.contentForeground, 1.5)
@@ -2079,6 +2135,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   // The reason, because "not your normal password" reads as
                   // an arbitrary rule without it.
@@ -2113,6 +2170,7 @@ Panel {
                     spacing: Style.space(2)
 
                     Text {
+                      textFormat: Text.PlainText
                       width: parent.width
                       text: "1.  Open account.apple.com and sign in"
                       color: root.contentForeground
@@ -2122,6 +2180,7 @@ Panel {
                     }
 
                     Text {
+                      textFormat: Text.PlainText
                       width: parent.width
                       text: "2.  Go to App-Specific Passwords"
                       color: root.contentForeground
@@ -2131,6 +2190,7 @@ Panel {
                     }
 
                     Text {
+                      textFormat: Text.PlainText
                       width: parent.width
                       text: "3.  Add one, name it Omarchy, copy the code below"
                       color: root.contentForeground
@@ -2195,6 +2255,7 @@ Panel {
                   height: signInLabel.implicitHeight
 
                   Text {
+                    textFormat: Text.PlainText
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     width: parent.width - signInLabel.width - Style.space(10)
@@ -2211,6 +2272,7 @@ Panel {
 
                   Text {
                     id: signInLabel
+                    textFormat: Text.PlainText
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     text: "Sign in"
@@ -2235,6 +2297,7 @@ Panel {
                 // feed works on its own, but the form above says otherwise by
                 // being the only thing on offer. So it says so.
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   text: "Or skip this: + below subscribes to a calendar feed, no account needed"
                   color: Qt.darker(root.contentForeground, 2.1)
@@ -2245,6 +2308,7 @@ Panel {
               }
 
               Text {
+                textFormat: Text.PlainText
                 visible: !root.signInVisible && root.missingPackages.length === 0
                   && root.selectedEvents.length === 0
                 width: parent.width
@@ -2259,6 +2323,7 @@ Panel {
               // it: what is on screen is the last calendar that arrived, and
               // saying nothing would let it quietly go stale.
               Text {
+                textFormat: Text.PlainText
                 visible: root.syncTrouble !== "" && !root.signInVisible
                   && root.missingPackages.length === 0
                 width: parent.width
@@ -2280,6 +2345,7 @@ Panel {
 
                 Text {
                   id: composeAction
+                  textFormat: Text.PlainText
                   anchors.left: parent.left
                   anchors.verticalCenter: parent.verticalCenter
                   text: root.composing ? "× Cancel" : "+ New event"
@@ -2352,6 +2418,7 @@ Panel {
                   spacing: Style.space(8)
 
                   Text {
+                    textFormat: Text.PlainText
                     anchors.verticalCenter: parent.verticalCenter
                     width: Style.space(74)
                     text: Qt.formatDate(root.selectedDate, "d MMM").toUpperCase()
@@ -2381,6 +2448,7 @@ Panel {
                   }
 
                   Text {
+                    textFormat: Text.PlainText
                     anchors.verticalCenter: parent.verticalCenter
                     text: "→"
                     color: Qt.darker(root.contentForeground, 1.9)
@@ -2405,6 +2473,7 @@ Panel {
                   }
 
                   Text {
+                    textFormat: Text.PlainText
                     anchors.verticalCenter: parent.verticalCenter
                     visible: !root.allDayBox
                       && Events.crossesMidnight(startField.text, endField.text)
@@ -2452,6 +2521,7 @@ Panel {
                       }
 
                       Text {
+                        textFormat: Text.PlainText
                         anchors.verticalCenter: parent.verticalCenter
                         text: "All day"
                         color: allDayMouse.containsMouse
@@ -2513,6 +2583,7 @@ Panel {
                           }
 
                           Text {
+                            textFormat: Text.PlainText
                             anchors.verticalCenter: parent.verticalCenter
                             text: root.displayName(pick.modelData)
                             color: pick.chosen
@@ -2535,6 +2606,7 @@ Panel {
 
                   Text {
                     id: createButton
+                    textFormat: Text.PlainText
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.creating ? "Creating…" : "Create"
@@ -2558,6 +2630,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   visible: root.composeError !== ""
                   text: root.composeError
@@ -2621,6 +2694,7 @@ Panel {
                         }
 
                         Text {
+                          textFormat: Text.PlainText
                           anchors.verticalCenter: parent.verticalCenter
                           text: root.displayName(chip.modelData.name)
                           color: chip.hidden
@@ -2668,6 +2742,7 @@ Panel {
 
                     Text {
                       id: addLabel
+                      textFormat: Text.PlainText
                       anchors.verticalCenter: parent.verticalCenter
                       // With calendars beside it the glyph is enough; with
                       // none it would be a lone mark on an empty row, so it
@@ -2710,6 +2785,7 @@ Panel {
                 //      and the switches read cleaner without it among them.
                 Text {
                   id: accountAction
+                  textFormat: Text.PlainText
                   anchors.right: parent.right
                   anchors.top: parent.top
                   anchors.topMargin: Style.space(2)
@@ -2839,6 +2915,7 @@ Panel {
                 Item { width: Style.space(4); height: 1 }
 
                 Text {
+                  textFormat: Text.PlainText
                   anchors.verticalCenter: parent.verticalCenter
                   visible: root.colouring || root.colourError !== "" || root.editingOwnCalendar
                   text: root.colouring
@@ -2856,6 +2933,7 @@ Panel {
 
                 // Done, for anyone who does not think to press Enter.
                 Text {
+                  textFormat: Text.PlainText
                   anchors.verticalCenter: parent.verticalCenter
                   text: "Done"
                   color: doneMouse.containsMouse
@@ -2886,6 +2964,7 @@ Panel {
 
                 Text {
                   id: calendarDeleteRow
+                  textFormat: Text.PlainText
                   anchors.left: parent.left
                   anchors.right: parent.right
                   text: root.deletingCalendar
@@ -2924,6 +3003,7 @@ Panel {
                 spacing: Style.space(16)
 
                 Text {
+                  textFormat: Text.PlainText
                   text: "Keep it"
                   color: keepMouse.containsMouse
                     ? Style.hoverStateColor(root.contentForeground, Color.accent)
@@ -2942,6 +3022,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   text: root.editedCalendar && root.editedCalendar.subscribed === true
                     ? "Stop following it" : "Delete it"
                   color: confirmDeleteMouse.containsMouse
@@ -2971,6 +3052,7 @@ Panel {
                 spacing: Style.space(16)
 
                 Text {
+                  textFormat: Text.PlainText
                   text: "New calendar"
                   color: newCalMouse.containsMouse
                     ? Style.hoverStateColor(root.contentForeground, Color.accent)
@@ -2995,6 +3077,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   text: "Subscribe to a feed"
                   color: feedMouse.containsMouse
                     ? Style.hoverStateColor(root.contentForeground, Color.accent)
@@ -3078,6 +3161,7 @@ Panel {
 
                   Text {
                     id: makeButton
+                    textFormat: Text.PlainText
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.makingCalendar ? "Creating…" : "Create"
@@ -3101,6 +3185,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   visible: root.subscribeError !== ""
                   text: root.subscribeError
@@ -3138,6 +3223,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   text: root.subscribing
                     ? "Fetching…"
@@ -3177,6 +3263,7 @@ Panel {
 
                   Text {
                     id: hideClockLabel
+                    textFormat: Text.PlainText
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     width: parent.width - hideClockAction.width - Style.space(12)
@@ -3189,6 +3276,7 @@ Panel {
 
                   Text {
                     id: hideClockAction
+                    textFormat: Text.PlainText
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     text: "Hide it"
