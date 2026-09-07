@@ -261,6 +261,15 @@ calendar's colour, all go to the server. Every destructive action asks twice
 and says what it costs first. A subscribed feed is somebody else's file and
 nothing here can write to one.
 
+**Limits.** A server you signed in to is bounded the same way a stranger's
+feed is. Replies are read in pieces up to a ceiling, a repeating rule is
+unrolled one occurrence at a time instead of all at once, and one allowance of
+events and objects is shared by every calendar and feed in a sync. Each source
+gets twenty seconds and the whole sync ninety, on a clock that stops it
+wherever it has got to rather than one that has to be asked. A source that runs
+into any of these is left out and named on the panel, and the rest of the sync
+finishes without it.
+
 **Processes.** The panel runs one helper: the `bin/omadates-sync` beside it.
 Each call has a network timeout, only one of each kind runs at a time, and
 anything still going after forty seconds is stopped and reported rather than

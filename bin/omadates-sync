@@ -25,12 +25,15 @@ Passwords live in the login keyring via secret-tool, never in the config file.
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import traceback
 import uuid
+from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from time import monotonic
 
 APP = "omadates"
 KEYRING_SERVICE = "io.github.gabbe2312.calendar"
@@ -83,6 +86,17 @@ MAX_REDIRECTS = 5
 SUMMARY_LIMIT = 200
 LOCATION_LIMIT = 200
 MAX_EVENTS = 5000
+
+# A limit applied to a finished pile of work is not a limit. The pile has
+# already been built by then, and building it is the expensive part. So what
+# arrives is counted as it arrives, how far a repeating rule may be unrolled is
+# counted as it unrolls, and the whole run is under a clock that does not need
+# anyone's cooperation to go off. A calendar server is not a trusted party here
+# any more than a subscribed feed is: both decide how much to send.
+MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+MAX_OBJECTS = 20000
+SOURCE_SECONDS = 20
+SYNC_SECONDS = 90
 
 REQUIREMENTS = [
     ("caldav", "python-caldav"),
@@ -299,13 +313,19 @@ def dav_client(config, username, password):
     matters most here. RFC 6764 discovery is off: the address is one this
     machine already holds, so letting a DNS answer nominate some other server
     to send the password to buys nothing and risks exactly that.
+
+    The session is capped on the way out. Signing in to a server does not make
+    it well behaved, and a reply is read here in bounded pieces the same way a
+    stranger's feed is.
     """
     import caldav
-    return caldav.DAVClient(
+    client = caldav.DAVClient(
         url=require_https(config.get("url"), "the calendar server address"),
         username=username, password=password,
         timeout=NETWORK_TIMEOUT, ssl_verify_cert=True, enable_rfc6764=False,
     )
+    cap_session(client.session)
+    return client
 
 
 def account_calendars(config, username):
@@ -361,8 +381,93 @@ def calendar_name(calendar, fallback):
     return fallback
 
 
-def collect_caldav(calendar, start, end, tz, name, color):
-    """Every VEVENT in the window, recurrences expanded."""
+class SyncTooLong(BaseException):
+    """The whole-run clock ran out.
+
+    Deliberately not an Exception. The gathering is full of handlers that let
+    one bad calendar fail without taking the others down, and every one of them
+    would swallow this and carry on past the deadline it was meant to enforce.
+    The same reasoning that puts KeyboardInterrupt outside Exception puts this
+    there: it is not a calendar's problem to handle.
+    """
+
+
+@contextmanager
+def time_limit(seconds):
+    """A stop on the whole operation that does not need to be asked politely.
+
+    The checks scattered through the gathering only come round between pieces
+    of work. A rule that unrolls for an hour inside somebody else's library
+    never reaches one of them, so there has to be something outside the loops
+    as well. This is that: the alarm goes off, the exception is raised wherever
+    the program happens to be, and the sync ends with a sentence instead of a
+    machine that has stopped answering.
+    """
+    def ring(signum, frame):
+        raise SyncTooLong("this sync was taking too long and was stopped")
+
+    # One timer serves the whole process, so an inner limit borrows it and
+    # gives back what is left. It may only ever shorten: a calendar cannot buy
+    # itself more time than the run it belongs to still has.
+    outer = signal.getitimer(signal.ITIMER_REAL)[0]
+    if outer:
+        seconds = min(seconds, outer)
+    previous = signal.signal(signal.SIGALRM, ring)
+    started = monotonic()
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+        if outer:
+            signal.setitimer(
+                signal.ITIMER_REAL, max(outer - (monotonic() - started), 0.000001))
+
+
+class Budget:
+    """What one sync is allowed to spend, shared by everything it talks to.
+
+    One counter for the whole run rather than one per calendar, because what is
+    being protected is the machine and not any single source. A feed that tries
+    to fill the panel on its own runs the account out of room and is stopped,
+    which is the right outcome: the alternative is five well behaved calendars
+    paying for the sixth.
+
+    Nothing here refuses to draw an event that would have been fine. The
+    numbers are far past a real diary, so reaching one is a source misbehaving,
+    and the panel says so rather than quietly showing less.
+    """
+
+    def __init__(self, events, objects, seconds):
+        self.events = events
+        self.objects = objects
+        self.expires = monotonic() + seconds
+        self.spent = False
+
+    def take_event(self):
+        """Room for one more event, or False once there is none."""
+        if self.events <= 0:
+            self.spent = True
+            return False
+        self.events -= 1
+        return True
+
+    def take_object(self):
+        """Room to open one more thing the server handed back."""
+        if self.objects <= 0:
+            self.spent = True
+            return False
+        self.objects -= 1
+        return True
+
+    def check_clock(self):
+        if monotonic() > self.expires:
+            raise SyncTooLong("this sync was taking too long and was stopped")
+
+
+def collect_caldav(calendar, start, end, tz, name, color, budget):
+    """Every VEVENT in the window, recurrences expanded, within the budget."""
     try:
         results = calendar.search(start=start, end=end, event=True, expand=True)
     except Exception:
@@ -372,11 +477,19 @@ def collect_caldav(calendar, start, end, tz, name, color):
 
     events = []
     for item in results:
+        budget.check_clock()
+        if not budget.take_object():
+            break
         try:
             component = item.icalendar_instance
         except Exception:
             continue
         for sub in component.walk("VEVENT"):
+            # Counted before it is built, not after. One object is allowed to
+            # contain any number of these, and a malformed one that build_event
+            # throws away still cost the time it took to walk to.
+            if not budget.take_event():
+                return events
             built = build_event(sub, tz, name, color, subscribed=False)
             if built:
                 events.append(built)
@@ -477,25 +590,53 @@ def check_destination(url, allow_private):
     return url
 
 
-def read_capped(response):
-    """The feed's bytes, up to a limit, rather than whatever it decides to send.
+def read_capped(response, limit):
+    """The bytes of a reply, up to a limit, rather than whatever it decides to send.
 
-    Without this a feed that answers with an endless stream takes the machine's
-    memory with it, and nothing about the request says how much is coming: a
-    Content-Length is a claim, not a promise, so it is checked when offered and
-    the actual read is counted regardless.
+    Without this an answer that never ends takes the machine's memory with it,
+    and nothing about the request says how much is coming: a Content-Length is
+    a claim, not a promise, so it is checked when offered and the actual read
+    is counted regardless.
     """
     declared = response.headers.get("Content-Length")
-    if declared and declared.isdigit() and int(declared) > MAX_FEED_BYTES:
+    if declared and declared.isdigit() and int(declared) > limit:
         raise RuntimeError("that calendar is too large to read")
 
     chunks, total = [], 0
     for chunk in response.iter_content(64 * 1024):
         total += len(chunk)
-        if total > MAX_FEED_BYTES:
+        if total > limit:
             raise RuntimeError("that calendar is too large to read")
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+def cap_session(session):
+    """Put a ceiling under caldav on how much of a reply it can be handed.
+
+    caldav asks for whole bodies, so there is no moment in its own code where a
+    reply is still arriving and could be cut off. An adapter is where requests
+    means for that to happen: the reply is streamed here, counted, and only
+    then passed up as though it had come all at once. The library above is
+    unchanged and none the wiser.
+    """
+    from requests.adapters import HTTPAdapter
+
+    class Capped(HTTPAdapter):
+        def send(self, request, **kwargs):
+            kwargs["stream"] = True
+            response = super().send(request, **kwargs)
+            try:
+                body = read_capped(response, MAX_RESPONSE_BYTES)
+            except BaseException:
+                response.close()
+                raise
+            response._content = body
+            response._content_consumed = True
+            return response
+
+    session.mount("https://", Capped())
+    return session
 
 
 def fetch_feed(url):
@@ -532,13 +673,29 @@ def fetch_feed(url):
                 # ISO-8859-1 for text/* without a declared charset, which turns
                 # every accented letter into mojibake. RFC 5545 says iCalendar
                 # is UTF-8, and icalendar decodes bytes on that assumption.
-                return read_capped(response)
+                return read_capped(response, MAX_FEED_BYTES)
         raise RuntimeError("that calendar redirected too many times")
     finally:
         session.close()
 
 
-def fetch_subscription(entry, start, end, tz):
+def begins_after(sub, end, tz):
+    """Whether an occurrence starts past the end of the window."""
+    dtstart = sub.get("DTSTART")
+    if dtstart is None:
+        return False
+    value = dtstart.dt
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=tz)
+    elif isinstance(value, date):
+        value = datetime.combine(value, time.min, tzinfo=tz)
+    else:
+        return False
+    return value > end
+
+
+def fetch_subscription(entry, start, end, tz, budget):
     """One subscribed .ics feed, expanded over the same window as CalDAV."""
     import icalendar
     import recurring_ical_events
@@ -555,12 +712,21 @@ def fetch_subscription(entry, start, end, tz):
     color = normalise_hex(calendar.get("X-APPLE-CALENDAR-COLOR", ""))
 
     events = []
-    for sub in recurring_ical_events.of(calendar).between(start, end):
+    # .after() is a generator where .between() is not, and that is the whole
+    # of it. between() unrolls the entire window before the first line of this
+    # loop runs, so a rule repeating every second has already cost what it
+    # costs by the time anything counts how many events came back. after()
+    # hands them over one at a time in order of start, which is what makes
+    # stopping mean something.
+    for sub in recurring_ical_events.of(calendar).after(start):
+        budget.check_clock()
+        if begins_after(sub, end, tz):
+            break
+        if not budget.take_event():
+            break
         built = build_event(sub, tz, name, color, subscribed=True)
         if built:
             events.append(built)
-        if len(events) >= MAX_EVENTS:
-            break
     return events, name, color
 
 
@@ -1362,6 +1528,15 @@ def cmd_unsubscribe(args):
 
 
 def cmd_sync():
+    """Refresh the cache, under a clock that ends the run either way."""
+    try:
+        with time_limit(SYNC_SECONDS):
+            return sync_once()
+    except SyncTooLong as exc:
+        return fail(str(exc))
+
+
+def sync_once():
     missing = missing_dependencies()
     if missing:
         return fail("missing packages: " + " ".join(missing))
@@ -1381,6 +1556,10 @@ def cmd_sync():
     start = now - timedelta(days=int(config["daysBack"]))
     end = now + timedelta(days=int(config["daysAhead"]))
     wanted = [str(n) for n in (config.get("calendars") or [])]
+
+    # One allowance for the whole run: the events it may draw, the objects it
+    # may open, and the time it may take. Whoever asks first spends it.
+    budget = Budget(MAX_EVENTS, MAX_OBJECTS, SYNC_SECONDS)
 
     events, problems = [], []
     # The calendars in their own right, not inferred from the events in them.
@@ -1405,7 +1584,15 @@ def cmd_sync():
             if wanted and name not in wanted:
                 continue
             try:
-                events.extend(collect_caldav(calendar, start, end, tz, name, colour))
+                # Its own clock as well as the run's. One calendar that will
+                # not finish is a line in the panel, not a sync that never
+                # returns and takes the other four down with it.
+                with time_limit(SOURCE_SECONDS):
+                    events.extend(
+                        collect_caldav(calendar, start, end, tz, name, colour, budget))
+            except SyncTooLong:
+                budget.check_clock()
+                problems.append(f"{name}: took too long to read and was left out")
             except Exception as exc:
                 problems.append(f"{name}: {friendly_error(exc)}")
 
@@ -1413,7 +1600,13 @@ def cmd_sync():
     for entry in subscriptions:
         label = str(entry.get("name") or entry.get("url") or "subscription")
         try:
-            fetched, name, colour = fetch_subscription(entry, start, end, tz)
+            # A repeating rule is unrolled from where it starts, not from where
+            # the window does, so a feed whose rule began years ago and repeats
+            # every second spends all of its time before the first event even
+            # reaches the loop that would have stopped it. The clock is what
+            # stops that, since nothing inside the expansion asks to be.
+            with time_limit(SOURCE_SECONDS):
+                fetched, name, colour = fetch_subscription(entry, start, end, tz, budget)
             events.extend(fetched)
             if name:
                 calendars_meta.append({
@@ -1428,6 +1621,9 @@ def cmd_sync():
                     # is not what the config is keyed by.
                     "url": str(entry.get("url") or ""),
                 })
+        except SyncTooLong:
+            budget.check_clock()
+            problems.append(f"{label}: took too long to read and was left out")
         except Exception as exc:
             problems.append(f"{label}: {friendly_error(exc)}")
 
@@ -1437,13 +1633,15 @@ def cmd_sync():
     if username:
         write_tokens(collection_tokens(calendars))
 
+    if budget.spent:
+        # The window is four months wide, so reaching this is a source
+        # misbehaving rather than a busy diary. The gathering has already
+        # stopped by now; what is left is to say so, because a month that
+        # quietly ends halfway through is worse than a line explaining why.
+        problems.append(f"stopped at {len(events)} events: a calendar sent far "
+                        f"more than a diary holds")
+
     events.sort(key=lambda e: (e["start"], e["summary"]))
-    if len(events) > MAX_EVENTS:
-        # The window is four months wide, so this is a feed misbehaving rather
-        # than a busy diary. Better a truncated month than a shell that stalls
-        # laying out a hundred thousand rows.
-        problems.append(f"showing the first {MAX_EVENTS} events of {len(events)}")
-        events = events[:MAX_EVENTS]
     write_cache({
         "status": "ok",
         "error": "; ".join(problems),
