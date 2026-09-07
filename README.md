@@ -254,7 +254,17 @@ through a link somewhere else.
 Titles and places are cut to a line's worth and stripped of control
 characters and the bidirectional overrides that make text render backwards,
 so no event can rearrange the panel or make its title read as something it is
-not.
+not. Nothing overflows its box either: a meeting link long enough to have no
+word in it wraps rather than running off the side.
+
+**Links.** A meeting URL, an address, a number to dial: an open event makes
+those clickable, because reading one off the screen to type it somewhere else
+is not what a calendar is for. A location that is a URL opens the meeting
+rather than a map. What is clickable was found by a pattern rather than
+supplied by the calendar: the note is escaped first and only this plugin's own
+links are put back, so an event whose notes contain markup draws the
+characters it is made of. Only http, https, mailto and tel ever reach a
+handler, and the panel and the helper each check that separately.
 
 **Writes.** Creating and deleting events and calendars, and setting a
 calendar's colour, all go to the server. Every destructive action asks twice

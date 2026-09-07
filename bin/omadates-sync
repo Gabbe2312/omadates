@@ -16,6 +16,7 @@ Subcommands (the panel drives all of these; they also work by hand):
     newcalendar           Make a calendar on the server, JSON on stdin.
     deletecalendar        Remove a calendar, or drop a feed. JSON on stdin.
     map <location>        Open a location in the system's map handler.
+    open <url>            Open a link from an event in the system's handler.
     subscribe <url>       Add a webcal:// or https://….ics feed, then sync.
     unsubscribe <url>     Drop a feed, then sync.
     check                 Report missing dependencies as JSON. Never fails.
@@ -1268,6 +1269,63 @@ def cmd_colour(args):
     return 0
 
 
+# Nothing else is ever launched. A calendar is a stranger's writing, and the
+# addresses in it are the whole reason to open one, so the schemes an event
+# has a reason to carry are named here and everything else is refused: no
+# file://, no javascript:, nothing that names a program to run.
+OPENABLE_SCHEMES = ("http://", "https://", "mailto:", "tel:")
+
+
+def launcher():
+    """How this machine opens things, or None if it cannot.
+
+    gio first, xdg-open second. xdg-open exits 0 and does nothing at all for a
+    scheme the desktop does not recognise, which is a silent failure and the
+    worst kind; gio consults the same handler registry and actually launches.
+    """
+    import shutil
+    opener = shutil.which("gio")
+    if opener:
+        return [opener, "open"]
+    opener = shutil.which("xdg-open")
+    return [opener] if opener else None
+
+
+def cmd_open(args):
+    """Open a link out of an event in whatever the machine registered for it.
+
+    The panel checks the scheme before asking and it is checked again here,
+    because the two are not the same promise: one is what the panel believes
+    it sent, this is what actually reaches a launcher. A control character in
+    the middle would go to the shell's own argument handling rather than to a
+    browser, so the address has to be one line of printable text or nothing.
+    """
+    target = " ".join(args).strip()
+    if not target:
+        print("omadates-sync: open needs an address", file=sys.stderr)
+        return 2
+    if target != strip_controls(target):
+        print("omadates-sync: that address is not one anything can open",
+              file=sys.stderr)
+        return 2
+    if not target.lower().startswith(OPENABLE_SCHEMES):
+        print("omadates-sync: refusing to open " + target.split(":", 1)[0] + ":",
+              file=sys.stderr)
+        return 2
+
+    launch = launcher()
+    if launch is None:
+        print("omadates-sync: neither gio nor xdg-open is installed", file=sys.stderr)
+        return 1
+
+    subprocess.Popen(launch + [target], start_new_session=True,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if target.lower().startswith(("http://", "https://")):
+        focus_browser()
+    print("omadates-sync: opened " + target)
+    return 0
+
+
 def cmd_map(args):
     """Open a location in whatever this system uses for maps.
 
@@ -1284,15 +1342,7 @@ def cmd_map(args):
     if not query:
         print("omadates-sync: map needs a location", file=sys.stderr)
         return 2
-    # gio first, xdg-open second. xdg-open exits 0 and does nothing at all
-    # for a geo: URI on a desktop it does not recognise, which is a silent
-    # failure and the worst kind; gio consults the same handler registry and
-    # actually launches it.
-    opener = shutil.which("gio")
-    launch = [opener, "open"] if opener else None
-    if launch is None:
-        opener = shutil.which("xdg-open")
-        launch = [opener] if opener else None
+    launch = launcher()
     if launch is None:
         print("omadates-sync: neither gio nor xdg-open is installed", file=sys.stderr)
         return 1
@@ -1685,6 +1735,8 @@ def main(argv):
         return cmd_poll()
     if command == "map":
         return cmd_map(rest)
+    if command == "open":
+        return cmd_open(rest)
     if command == "create":
         return cmd_create(rest)
     if command == "delete":

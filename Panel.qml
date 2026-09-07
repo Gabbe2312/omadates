@@ -545,6 +545,18 @@ Panel {
     mapProcess.running = true
   }
 
+  // A link out of somebody else's calendar, opened through the helper for the
+  // same reason the map is: one place that decides what may be launched. The
+  // scheme is checked here and again there, because this is the only path in
+  // the plugin where a stranger's text reaches something that opens things.
+  function openLink(url) {
+    var target = String(url || "").replace(/^\s+|\s+$/g, "")
+    if (!/^(https?|mailto|tel):/i.test(target)) return
+    if (linkProcess.running) return
+    linkProcess.command = root.syncCommand.concat(["open", target])
+    linkProcess.running = true
+  }
+
   function startComposing() {
     root.composeError = ""
     root.composing = true
@@ -948,6 +960,10 @@ Panel {
 
   Process {
     id: mapProcess
+  }
+
+  Process {
+    id: linkProcess
   }
 
   Process {
@@ -1942,7 +1958,7 @@ Panel {
                       // being scannable. Expanded, the whole title is the
                       // reason you opened it.
                       elide: eventRow.expanded ? Text.ElideNone : Text.ElideRight
-                      wrapMode: eventRow.expanded ? Text.WordWrap : Text.NoWrap
+                      wrapMode: eventRow.expanded ? Text.Wrap : Text.NoWrap
                     }
 
                     Text {
@@ -1961,7 +1977,7 @@ Panel {
                       font.pixelSize: Style.font.caption
                       font.underline: eventRow.expanded && locationMouse.containsMouse
                       elide: eventRow.expanded ? Text.ElideNone : Text.ElideRight
-                      wrapMode: eventRow.expanded ? Text.WordWrap : Text.NoWrap
+                      wrapMode: eventRow.expanded ? Text.Wrap : Text.NoWrap
 
                       MouseArea {
                         id: locationMouse
@@ -1969,12 +1985,18 @@ Panel {
                         enabled: eventRow.expanded
                         hoverEnabled: enabled
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.openMap(eventRow.modelData.location)
+                        // Half the invitations in a working week put the
+                        // meeting URL in the location field, and looking that
+                        // up on a map has never found anybody a meeting.
+                        onClicked: Events.isLink(eventRow.modelData.location)
+                          ? root.openLink(eventRow.modelData.location)
+                          : root.openMap(eventRow.modelData.location)
                       }
 
                       PanelToolTip {
                         visible: locationMouse.containsMouse
-                        text: "Open in maps"
+                        text: Events.isLink(eventRow.modelData.location)
+                          ? "Open link" : "Open in maps"
                         fontFamily: root.contentFontFamily
                       }
                     }
@@ -2013,15 +2035,35 @@ Panel {
                       }
 
                       Text {
-                        textFormat: Text.PlainText
+                        id: eventNotes
+                        // The one place in the panel that is not PlainText,
+                        // and it is escaped into safety before it gets here:
+                        // Events.linkify puts back only its own <a> tags,
+                        // around what a pattern found. A note that arrives
+                        // full of markup draws the characters it is made of.
+                        textFormat: Text.StyledText
                         width: parent.width
                         visible: eventRow.modelData.description !== ""
                         topPadding: visible ? Style.space(3) : 0
-                        text: eventRow.modelData.description
+                        text: Events.linkify(eventRow.modelData.description)
                         color: Qt.darker(root.contentForeground, 1.8)
+                        linkColor: Style.hoverStateColor(root.contentForeground, Color.accent)
                         font.family: root.contentFontFamily
                         font.pixelSize: Style.font.caption
-                        wrapMode: Text.WordWrap
+                        wrapMode: Text.Wrap
+                        onLinkActivated: function(link) { root.openLink(link) }
+
+                        // A handler and not a MouseArea. An area over the
+                        // text would take the hover for itself and the Text
+                        // would never know a link was under the pointer, so
+                        // hoveredLink would stay empty and the cursor never
+                        // change. This watches without taking, which leaves
+                        // the press for the link and the rest of the note
+                        // for the row underneath, the one that closes it.
+                        HoverHandler {
+                          cursorShape: eventNotes.hoveredLink !== ""
+                            ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        }
                       }
 
                       // Last in the block, whatever the block holds. Notes
@@ -2145,7 +2187,7 @@ Panel {
                   color: Qt.darker(root.contentForeground, 1.75)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
-                  wrapMode: Text.WordWrap
+                  wrapMode: Text.Wrap
                 }
 
                 Item {
@@ -2176,7 +2218,7 @@ Panel {
                       color: root.contentForeground
                       font.family: root.contentFontFamily
                       font.pixelSize: Style.font.caption
-                      wrapMode: Text.WordWrap
+                      wrapMode: Text.Wrap
                     }
 
                     Text {
@@ -2186,7 +2228,7 @@ Panel {
                       color: root.contentForeground
                       font.family: root.contentFontFamily
                       font.pixelSize: Style.font.caption
-                      wrapMode: Text.WordWrap
+                      wrapMode: Text.Wrap
                     }
 
                     Text {
@@ -2196,7 +2238,7 @@ Panel {
                       color: root.contentForeground
                       font.family: root.contentFontFamily
                       font.pixelSize: Style.font.caption
-                      wrapMode: Text.WordWrap
+                      wrapMode: Text.Wrap
                     }
                   }
 
@@ -2303,7 +2345,7 @@ Panel {
                   color: Qt.darker(root.contentForeground, 2.1)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
-                  wrapMode: Text.WordWrap
+                  wrapMode: Text.Wrap
                 }
               }
 
@@ -2316,7 +2358,7 @@ Panel {
                 color: Qt.darker(root.contentForeground, 1.9)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.bodySmall
-                wrapMode: Text.WordWrap
+                wrapMode: Text.Wrap
               }
 
               // Its own line, shown whether or not the day has anything on
@@ -2331,7 +2373,7 @@ Panel {
                 color: Qt.darker(root.contentForeground, 1.5)
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.caption
-                wrapMode: Text.WordWrap
+                wrapMode: Text.Wrap
               }
 
               // ---- Adding one. The grid is the date picker: the day you
@@ -2637,7 +2679,7 @@ Panel {
                   color: Qt.darker(root.contentForeground, 1.3)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
-                  wrapMode: Text.WordWrap
+                  wrapMode: Text.Wrap
                 }
               }
 
@@ -2981,7 +3023,7 @@ Panel {
                       : Qt.darker(root.contentForeground, 2.1))
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
-                  wrapMode: Text.WordWrap
+                  wrapMode: Text.Wrap
                 }
 
                 MouseArea {
@@ -3192,7 +3234,7 @@ Panel {
                   color: Qt.darker(root.contentForeground, 1.3)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
-                  wrapMode: Text.WordWrap
+                  wrapMode: Text.Wrap
                 }
               }
 
@@ -3235,7 +3277,7 @@ Panel {
                     : Qt.darker(root.contentForeground, 2.0)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
-                  wrapMode: Text.WordWrap
+                  wrapMode: Text.Wrap
                 }
               }
 

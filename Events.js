@@ -48,6 +48,74 @@ function oneLine(value, limit) {
   return text.length > limit ? text.slice(0, limit) + "…" : text
 }
 
+// ---- Links. An invitation is mostly somewhere to be: a meeting URL, the
+//      address of whoever sent it, a number to dial. Those are the whole
+//      point of the notes, and reading one off the screen to type it
+//      somewhere else is not what a calendar is for.
+//
+//      Nothing the calendar wrote is markup. The text is escaped first and
+//      only this file's own <a> tags are put back, around what a pattern
+//      found rather than around anything the event asked for. That is what
+//      keeps StyledText safe to use here: an event whose title is
+//      <img src="http://…"> draws those characters instead of fetching it.
+var LINKABLE = /(https?:\/\/[^\s<>()\[\]"']+)|(www\.[^\s<>()\[\]"']+)|([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})|(\+[0-9][0-9 ().-]{6,}[0-9])/g
+
+function escapeMarkup(value) {
+  return String(value === undefined || value === null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}
+
+// Notes keep their line breaks, and a newline is not one to StyledText.
+function escapeText(value) {
+  return escapeMarkup(value).replace(/\r\n|\r|\n/g, "<br>")
+}
+
+// What a match should actually open. Anything else opens nothing: the four
+// schemes here are the ones an event has a reason to carry, and a scheme this
+// does not name never reaches a launcher.
+function hrefFor(text) {
+  if (/^https?:\/\//i.test(text)) return text
+  if (/^www\./i.test(text)) return "https://" + text
+  if (text.indexOf("@") > 0) return "mailto:" + text
+  if (text.charAt(0) === "+") return "tel:" + text.replace(/[^0-9+]/g, "")
+  return ""
+}
+
+function isLink(value) {
+  var text = String(value || "").replace(/^\s+|\s+$/g, "")
+  return /^https?:\/\/\S+$/i.test(text)
+}
+
+function linkify(value) {
+  var text = String(value || "")
+  var out = ""
+  var last = 0
+  var match
+  LINKABLE.lastIndex = 0
+  while ((match = LINKABLE.exec(text)) !== null) {
+    var found = match[0]
+    // A full stop after an address ends the sentence rather than the
+    // address, and the same goes for the bracket somebody put it inside.
+    var trimmed = found.replace(/[.,;:!?)\]>]+$/, "")
+    var href = trimmed === "" ? "" : hrefFor(trimmed)
+    out += escapeText(text.slice(last, match.index))
+    if (href === "") {
+      out += escapeText(found)
+    } else {
+      out += '<a href="' + escapeMarkup(href) + '">' + escapeText(trimmed) + "</a>"
+        + escapeText(found.slice(trimmed.length))
+    }
+    last = match.index + found.length
+    // A pattern that can match nothing would sit here forever.
+    if (found === "") LINKABLE.lastIndex++
+  }
+  return out + escapeText(text.slice(last))
+}
+
 function safeColor(value) {
   // Only ever a hex triple. A colour is assigned straight to a QML colour
   // property, and anything else there is a warning on the console and a
