@@ -27,6 +27,7 @@ Passwords live in the login keyring via secret-tool, never in the config file.
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
 import traceback
@@ -73,6 +74,9 @@ NETWORK_TIMEOUT = 25
 # Apple ID; neither is anyone else's business on a shared machine.
 STATE_MODE = 0o600
 STATE_DIR_MODE = 0o700
+# A staging file this old cannot belong to a sync still running: the whole
+# operation is under a ninety second clock.
+STAGING_STALE_SECONDS = 3600
 
 # A subscribed feed is a URL somebody pasted, and what comes back is a file a
 # stranger controls. Both ends of that are bounded: how big the file may be,
@@ -111,65 +115,232 @@ REQUIREMENTS = [
 
 
 # ---------------------------------------------------------------- state files
+#
+# Everything here works on descriptors rather than on names, and that is the
+# whole design. A path is a question about the filesystem, and asking it twice
+# can get two different answers: the directory checked and the directory
+# written to may not be the same one by the time the write lands. A descriptor
+# is the answer, held. Each component is opened relative to the one above it
+# with O_NOFOLLOW and checked through its own fstat, and the file is then
+# created, written and published through that same descriptor, so there is no
+# name left in the middle for anything to swap.
 
-def secure_dir(path):
-    path.mkdir(parents=True, exist_ok=True)
+
+class StateNotPrivate(RuntimeError):
+    """Somewhere state was going is not somewhere state can safely go.
+
+    Its own class because it needs its own ending. The usual way to report
+    trouble is to write it into the cache for the panel to draw, and the cache
+    is exactly what cannot be written when this is raised, so saying it that
+    way would fail again on the way out. It ends the run with the sentence
+    instead.
+    """
+
+
+def owned_privately(info, what):
+    """Raise unless this is ours and nobody else can write to it."""
+    if info.st_uid != os.getuid():
+        raise StateNotPrivate(f"{what} is not yours; refusing to keep calendar state there")
+    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise StateNotPrivate(f"{what} can be written to by others; refusing to keep "
+                              f"calendar state there")
+    return info
+
+
+def home_fd():
+    """The one component taken on trust as a name, because the walk starts somewhere.
+
+    Trusted, not unchecked. A home directory that the group can write to is a
+    home where none of the care below it means anything, and it is worth saying
+    so rather than carrying on. O_NOFOLLOW is deliberately absent here alone:
+    a home directory is allowed to be a symlink, and on plenty of machines is.
+    """
+    home = Path.home()
+    fd = os.open(str(home), os.O_RDONLY | os.O_DIRECTORY)
     try:
-        os.chmod(path, STATE_DIR_MODE)
+        owned_privately(os.fstat(fd), str(home))
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def open_child_dir(dir_fd, name, create, leaf, shown):
+    """One step down, opened through the directory above it."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        fd = os.open(name, flags, dir_fd=dir_fd)
+    except FileNotFoundError:
+        if not create:
+            raise
+        # Private from the moment it exists. Created wide and narrowed after
+        # would leave a window where the calendar is readable, and a window is
+        # all anyone needs.
+        os.mkdir(name, STATE_DIR_MODE, dir_fd=dir_fd)
+        fd = os.open(name, flags, dir_fd=dir_fd)
+    try:
+        info = owned_privately(os.fstat(fd), str(shown))
+        # Only this plugin's own directory is narrowed. The ones above it are
+        # shared with everything else under ~/.config and ~/.cache, and taking
+        # those private would be this plugin deciding for its neighbours.
+        if leaf and stat.S_IMODE(info.st_mode) != STATE_DIR_MODE:
+            os.fchmod(fd, STATE_DIR_MODE)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def open_state_dir(path, create=True):
+    """A descriptor for a state directory, opened a component at a time.
+
+    Walked from the home directory down rather than handed to the kernel whole,
+    because O_NOFOLLOW only ever speaks about the last component of a path. A
+    symlink planted three levels up would move the entire tree without the flag
+    noticing; opened step by step, each level has to answer for itself.
+    """
+    home = Path.home()
+    try:
+        parts = path.relative_to(home).parts
+    except ValueError:
+        raise StateNotPrivate(f"{path} is outside {home}; refusing to keep state there")
+
+    fd = home_fd()
+    shown = home
+    try:
+        for depth, part in enumerate(parts):
+            shown = shown / part
+            below = open_child_dir(fd, part, create, depth == len(parts) - 1, shown)
+            os.close(fd)
+            fd = below
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def private_file(fd, what):
+    """Raise unless the open file is a plain file of ours that only we can write."""
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode):
+        raise StateNotPrivate(f"{what} is not a regular file")
+    return owned_privately(info, str(what))
+
+
+def unlink_quietly(dir_fd, name):
+    try:
+        os.unlink(name, dir_fd=dir_fd)
     except OSError:
         pass
+
+
+def sweep_staging(dir_fd, name):
+    """Drop staging files a killed run left behind.
+
+    They are private and harmless, but a directory that only ever grows is its
+    own small mess. Old ones only: a staging file younger than the cutoff may
+    belong to a sync still running, and taking that one would make this the
+    thing that breaks the other.
+    """
+    prefix = f".{name}."
+    cutoff = datetime.now(timezone.utc).timestamp() - STAGING_STALE_SECONDS
+    try:
+        entries = os.listdir(dir_fd)
+    except OSError:
+        return
+    for entry in entries:
+        if not entry.startswith(prefix):
+            continue
+        try:
+            if os.stat(entry, dir_fd=dir_fd, follow_symlinks=False).st_mtime < cutoff:
+                unlink_quietly(dir_fd, entry)
+        except OSError:
+            pass
 
 
 def write_private(path, text):
-    """Write a state file atomically, privately, and without following a link.
+    """Write a state file atomically and privately, through descriptors only.
 
-    O_NOFOLLOW on the temporary file means a symlink planted at that name is an
-    error rather than a way to have this process write somewhere else as the
-    user who owns it. os.replace then swaps the finished file into place in one
-    step, which is what keeps the shell's file watcher from ever reading half a
-    cache, and which replaces a symlink at the destination rather than writing
-    through it.
+    The staging name carries a random suffix, so there is no name an attacker
+    can have waiting: a predictable one can be created first and then it is the
+    exclusive open that fails rather than the write that is redirected, which
+    turns every write into somebody else's decision. O_EXCL means we made this
+    file or we made nothing, O_NOFOLLOW means it is a file and not a pointer at
+    one, and the fstat afterwards says both again about the thing actually
+    open. The rename through the same descriptor is what the panel's file
+    watcher relies on: it sees the old cache or the new one, never half of one.
     """
-    secure_dir(path.parent)
-    tmp = path.with_name(path.name + ".tmp")
+    dir_fd = open_state_dir(path.parent)
     try:
-        os.unlink(tmp)
-    except FileNotFoundError:
-        pass
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, STATE_MODE)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(text)
-    except BaseException:
+        sweep_staging(dir_fd, path.name)
+        staging = f".{path.name}.{os.getpid()}.{os.urandom(8).hex()}"
+        fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     STATE_MODE, dir_fd=dir_fd)
         try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-    os.replace(tmp, path)
+            private_file(fd, staging)
+        except BaseException:
+            os.close(fd)
+            unlink_quietly(dir_fd, staging)
+            raise
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(text)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except BaseException:
+            unlink_quietly(dir_fd, staging)
+            raise
+        os.replace(staging, path.name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    finally:
+        os.close(dir_fd)
 
 
 def read_private(path):
-    """Read a state file this program wrote, refusing to follow a link there."""
+    """Read a state file this program wrote, through descriptors only.
+
+    A missing directory or a missing file is an ordinary answer and reads as
+    empty. Anything else is not: a symlink where the cache should be, or a file
+    somebody else owns, is a sentence worth hearing rather than an empty string
+    to carry on from.
+    """
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-    except OSError:
+        dir_fd = open_state_dir(path.parent, create=False)
+    except FileNotFoundError:
         return ""
-    with os.fdopen(fd, "r", encoding="utf-8") as handle:
-        return handle.read()
+    try:
+        try:
+            fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
+        except FileNotFoundError:
+            return ""
+        try:
+            private_file(fd, path)
+        except BaseException:
+            os.close(fd)
+            raise
+        with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            return handle.read()
+    finally:
+        os.close(dir_fd)
 
 
 # ---------------------------------------------------------------- config
 
 def load_config():
+    # No existence check first: asking whether the file is there and then
+    # opening it are two questions, and the answer can change in between. The
+    # read answers both at once, and an empty answer means there is nothing
+    # saved yet. Only the parsing is caught here, so a refusal to read state
+    # out of somewhere unsafe arrives in its own words rather than being
+    # reported as broken JSON.
     config = dict(DEFAULTS)
-    if CONFIG_PATH.exists():
+    raw = read_private(CONFIG_PATH)
+    if raw:
         try:
-            user = json.loads(read_private(CONFIG_PATH) or "{}")
-            if isinstance(user, dict):
-                config.update({k: v for k, v in user.items() if v is not None})
+            user = json.loads(raw)
         except Exception as exc:
             raise RuntimeError(f"config {CONFIG_PATH} is not valid JSON: {exc}")
+        if isinstance(user, dict):
+            config.update({k: v for k, v in user.items() if v is not None})
     return config
 
 
@@ -822,7 +993,13 @@ def fail(message):
         "events": [],
     }
     payload.update(last_good())
-    write_cache(payload)
+    # The message matters more than the record of it. If the cache cannot be
+    # written, saying so on stderr is still worth doing: the panel keeps its
+    # last good answer and the reason is in the journal.
+    try:
+        write_cache(payload)
+    except Exception:
+        pass
     print(f"omadates-sync: {message}", file=sys.stderr)
     return 1
 
@@ -1710,16 +1887,34 @@ def tighten_existing_state():
     Every write from here on makes them 0600 inside a 0700 directory, but a
     machine that ran an earlier version already has a world-readable cache
     sitting there holding the title of every appointment. Nothing but this
-    line would ever narrow it.
+    would ever narrow it.
+
+    Narrowed through the open file rather than by name. chmod on a path will
+    follow a symlink to whatever it points at, which makes a tidying pass into
+    a way of changing the mode of somebody else's file; fchmod can only ever
+    change the mode of the thing already open. A directory this cannot safely
+    reach is left alone: the write that follows will say why in full, and this
+    is not the place to refuse the whole run.
     """
     for path in (CONFIG_PATH, CACHE_PATH, TOKENS_PATH):
         try:
-            if path.parent.is_dir():
-                os.chmod(path.parent, STATE_DIR_MODE)
-            if path.is_file():
-                os.chmod(path, STATE_MODE)
+            dir_fd = open_state_dir(path.parent, create=False)
+        except (OSError, StateNotPrivate):
+            continue
+        try:
+            fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
         except OSError:
+            os.close(dir_fd)
+            continue
+        try:
+            info = private_file(fd, path)
+            if stat.S_IMODE(info.st_mode) != STATE_MODE:
+                os.fchmod(fd, STATE_MODE)
+        except (OSError, StateNotPrivate):
             pass
+        finally:
+            os.close(fd)
+            os.close(dir_fd)
 
 
 def main(argv):
@@ -1766,6 +1961,11 @@ if __name__ == "__main__":
         sys.exit(main(sys.argv[1:]))
     except SystemExit:
         raise
+    except StateNotPrivate as exc:
+        # Nothing to write it into, and nothing worth a traceback: this is a
+        # sentence about the machine, not a bug in the program.
+        print(f"omadates-sync: {exc}", file=sys.stderr)
+        sys.exit(1)
     except Exception:
         traceback.print_exc()
         sys.exit(fail("unexpected failure"))

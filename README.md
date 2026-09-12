@@ -245,10 +245,18 @@ on re-authentication cannot replace a working credential with a broken one.
 **On disk.** `~/.config/omarchy/omadates/` and `~/.cache/omarchy/omadates/`
 are `0700`, and the files in them `0600`. Between them they hold your Apple
 ID and the title, place and notes of everything on your calendar, which is
-nobody else's business on a shared machine. Every write goes to a temporary
-file that refuses to be a symlink and is then renamed into place, so the
-panel never reads half a cache and nothing here can be tricked into writing
-through a link somewhere else.
+nobody else's business on a shared machine.
+
+Nothing here is reached by name. The path is walked one directory at a time
+from your home directory down, each step opened through the one above it and
+refused if it is a symlink, if it belongs to somebody else, or if anyone but
+you can write to it. The file is then created, written and renamed through
+that same open directory, under a name with random characters in it, so there
+is no name sitting in the middle for anything to swap and no predictable one
+to have waiting. A check on a path and a write to that path are two different
+moments; a check on an open directory and a write through it are the same
+one. The rename is what keeps the panel from ever reading half a cache, and
+it replaces whatever was at the destination rather than writing through it.
 
 **On screen.** Everything that came off a server is drawn as plain text.
 Titles and places are cut to a line's worth and stripped of control
