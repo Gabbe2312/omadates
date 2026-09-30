@@ -124,6 +124,39 @@ function safeColor(value) {
   return /^#[0-9a-fA-F]{6}$/.test(text) ? text : ""
 }
 
+// What the helper staged: a file waiting for a yes. Bounded the same way the
+// cache is, because this is a file on disk too.
+function parseInbox(text) {
+  var empty = { name: "", events: [] }
+  var parsed
+  try { parsed = JSON.parse(String(text || "")) } catch (e) { return empty }
+  if (!parsed || typeof parsed !== "object") return empty
+  var list = parsed.events instanceof Array ? parsed.events : []
+  var out = []
+  for (var i = 0; i < list.length && i < 200; i++) {
+    var entry = list[i]
+    if (!entry || typeof entry !== "object") continue
+    out.push({
+      summary: oneLine(entry.summary, SUMMARY_LIMIT) || "(no title)",
+      start: oneLine(entry.start, 40),
+      end: oneLine(entry.end, 40),
+      allDay: entry.allDay === true,
+      recurring: entry.recurring === true
+    })
+  }
+  return { name: oneLine(parsed.name, 120), events: out }
+}
+
+// One staged event, as one line: when it is, and what it is called.
+function inboxLine(entry) {
+  if (!entry) return ""
+  var when = String(entry.start || "")
+  var stamp = when.length >= 16
+    ? (entry.allDay ? when.slice(0, 10) : when.slice(0, 10) + " " + when.slice(11, 16))
+    : when
+  return stamp + "   " + String(entry.summary || "")
+}
+
 function parseCache(text) {
   var empty = {
     status: "empty", error: "", syncedAt: "", events: [],

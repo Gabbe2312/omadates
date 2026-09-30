@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -563,6 +564,78 @@ Panel {
   // same reason the map is: one place that decides what may be launched. The
   // scheme is checked here and again there, because this is the only path in
   // the plugin where a stranger's text reaches something that opens things.
+  // ---- Dropping a calendar file on the panel.
+  //
+  // A .ics from a web page is somebody's suggestion, so dropping one stages
+  // it and nothing more: the panel then asks which calendar, and that press
+  // is what writes. Dropping is choosing the file, not agreeing to it.
+  property bool dragHovering: false
+  property var inbox: ({ name: "", events: [] })
+  readonly property bool inboxWaiting: (root.inbox.events || []).length > 0
+  // Remembered, and deliberately not defaulted. Everywhere else in this panel
+  // the first writable calendar is a fine guess, because those actions start
+  // with you looking at the thing you are about to change. This one starts
+  // with a file arriving, and the first calendar in the list may well be one
+  // shared with somebody whose phone buzzes for every event on it. So the
+  // first import asks, and every one after it remembers the answer.
+  property string inboxCalendar: String(root.setting("importCalendar", ""))
+  property bool importing: false
+  readonly property string inboxCalendarName: {
+    var chosen = String(root.inboxCalendar || "")
+    return root.writableCalendars.indexOf(chosen) !== -1 ? chosen : ""
+  }
+
+  function chooseImportCalendar(name) {
+    root.inboxCalendar = String(name || "")
+    root.persistSettings({ importCalendar: root.inboxCalendar })
+  }
+
+  readonly property var calendarFileTypes: [".ics", ".ical", ".icalendar", ".ifb"]
+
+  function looksLikeCalendarFile(url) {
+    var text = String(url || "").toLowerCase().replace(/[?#].*$/, "")
+    for (var i = 0; i < root.calendarFileTypes.length; i++)
+      if (text.slice(-root.calendarFileTypes[i].length) === root.calendarFileTypes[i])
+        return true
+    return false
+  }
+
+  function calendarFileIn(drop) {
+    if (!drop || !drop.hasUrls) return ""
+    for (var i = 0; i < drop.urls.length; i++)
+      if (root.looksLikeCalendarFile(drop.urls[i])) return String(drop.urls[i])
+    return ""
+  }
+
+  // The bar widget keeps the clock that decides when a drag is over, because
+  // it is the half that is always on screen. This panel only reports that the
+  // drag is still alive over here.
+  function noteHostDrag() {
+    if (root.hostWidget && typeof root.hostWidget.noteDragActivity === "function")
+      root.hostWidget.noteDragActivity()
+  }
+
+  function stageFile(url) {
+    var target = String(url || "")
+    if (target === "" || stageProcess.running) return
+    stageProcess.command = root.syncCommand.concat(["stage", target])
+    stageProcess.running = true
+  }
+
+  function acceptInbox() {
+    if (root.importing || root.inboxCalendarName === "") return
+    root.importing = true
+    importProcess.command = root.syncCommand.concat(["import", root.inboxCalendarName])
+    importProcess.running = true
+  }
+
+  function discardInbox() {
+    if (root.importing) return
+    root.inbox = ({ name: "", events: [] })
+    discardProcess.command = root.syncCommand.concat(["discard"])
+    discardProcess.running = true
+  }
+
   function openLink(url) {
     var target = String(url || "").replace(/^\s+|\s+$/g, "")
     if (!/^(https?|mailto|tel):/i.test(target)) return
@@ -981,6 +1054,35 @@ Panel {
   }
 
   Process {
+    id: stageProcess
+    // The helper writes the inbox file and the FileView below picks it up,
+    // so there is nothing to do here but let go of the flag.
+  }
+
+  Process {
+    id: importProcess
+    onExited: function(exitCode) {
+      root.importing = false
+      root.inbox = ({ name: "", events: [] })
+      calendarCache.reload()
+    }
+  }
+
+  Process {
+    id: discardProcess
+  }
+
+  FileView {
+    id: inboxFile
+    path: Quickshell.env("HOME") + "/.cache/omarchy/omadates/inbox.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.inbox = Events.parseInbox(text())
+    onLoadFailed: root.inbox = ({ name: "", events: [] })
+  }
+
+  Process {
     id: deleteCalendarProcess
     stdinEnabled: true
     onStarted: {
@@ -1231,6 +1333,30 @@ Panel {
         else if (t === "w" || t === "W") root.toggleWeekStart()
       }
 
+      // Takes drags, not clicks, so everything underneath still works
+      // normally. Declared before the content so the content draws over it.
+      DropArea {
+        id: panelDrop
+        anchors.fill: parent
+        onEntered: function(drop) {
+          if (root.calendarFileIn(drop) === "") { drop.accepted = false; return }
+          root.dragHovering = true
+          // Also what tells the bar widget the drag arrived, so the panel it
+          // sprang open for this is not closed out from under the pointer.
+          root.noteHostDrag()
+        }
+        onPositionChanged: root.noteHostDrag()
+        // Leaving is not the end of anything. The pointer may be on its way
+        // back to the bar, or to the far side of the month. Only the quiet
+        // afterwards ends a drag, and the bar widget is what times it.
+        onExited: root.noteHostDrag()
+        onDropped: function(drop) {
+          root.dragHovering = false
+          var file = root.calendarFileIn(drop)
+          if (file !== "") root.stageFile(file)
+        }
+      }
+
       Flickable {
         id: calendarScroll
         anchors.fill: parent
@@ -1238,6 +1364,17 @@ Panel {
         contentHeight: calendarColumn.implicitHeight
         clip: true
         boundsBehavior: Flickable.StopAtBounds
+        // The month goes soft while a file is over the panel, so it reads as
+        // somewhere to drop rather than something to read. Only while the
+        // drag is there: a layer costs a texture, and paying for one to look
+        // at a calendar you are not dropping anything on would be silly.
+        layer.enabled: root.dragHovering || root.inboxWaiting
+        layer.effect: MultiEffect {
+          blurEnabled: true
+          blur: 1.0
+          blurMax: 48
+          saturation: -0.3
+        }
         interactive: contentHeight > height || contentWidth > width
 
         Column {
@@ -3364,6 +3501,221 @@ Panel {
                   text: "Take it off the bar. It stays installed"
                   fontFamily: root.contentFontFamily
                 }
+              }
+            }
+          }
+        }
+      }
+
+      // ---- What a drag and a staged file look like. Both sit over the
+      //      month rather than in it: the month is context here, not the
+      //      thing being read, which is why it goes soft behind them.
+
+      Item {
+        anchors.fill: parent
+        visible: root.dragHovering
+
+        Column {
+          anchors.centerIn: parent
+          spacing: Style.space(6)
+          width: parent.width - Style.space(40)
+
+          // A file, drawn big. The month behind it has gone soft, so this is
+          // the only thing in focus, which is the whole message: the thing
+          // you are holding goes here.
+          Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            textFormat: Text.PlainText
+            text: "󰈙"
+            color: Style.selectedStateColor(root.contentForeground, Color.accent)
+            font.family: root.contentFontFamily
+            font.pixelSize: 72
+          }
+
+          Text {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            text: "Drop the calendar file here"
+            color: root.contentForeground
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.body
+          }
+        }
+      }
+
+      Rectangle {
+        id: inboxSheet
+        anchors.centerIn: parent
+        width: Math.min(parent.width - Style.space(24), Style.space(480))
+        height: Math.min(parent.height - Style.space(24), inboxBody.implicitHeight + Style.space(28))
+        visible: root.inboxWaiting
+        radius: Style.cornerRadius
+        color: Style.normalFillFor(root.contentForeground, Color.accent)
+        border.width: 1
+        border.color: Qt.darker(root.contentForeground, 2.4)
+
+        // Nothing underneath should take a press while this is asking.
+        MouseArea { anchors.fill: parent; hoverEnabled: true }
+
+        Column {
+          id: inboxBody
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.leftMargin: Style.space(14)
+          anchors.rightMargin: Style.space(14)
+          spacing: Style.space(3)
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            text: root.inbox.events.length === 1
+              ? "1 event from " + root.inbox.name
+              : root.inbox.events.length + " events from " + root.inbox.name
+            color: root.contentForeground
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.body
+          }
+
+          Repeater {
+            model: root.inbox.events.slice(0, 6)
+            Text {
+              required property var modelData
+              width: inboxBody.width
+              textFormat: Text.PlainText
+              elide: Text.ElideRight
+              text: Events.inboxLine(modelData)
+              color: Qt.darker(root.contentForeground, 1.6)
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+
+          Text {
+            width: parent.width
+            visible: root.inbox.events.length > 6
+            textFormat: Text.PlainText
+            text: "and " + (root.inbox.events.length - 6) + " more"
+            color: Qt.darker(root.contentForeground, 2.0)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Item { width: 1; height: Style.space(6) }
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            visible: root.writableCalendars.length === 0
+            wrapMode: Text.Wrap
+            text: "Sign in to a calendar account before adding events."
+            color: Qt.darker(root.contentForeground, 1.6)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Row {
+            spacing: Style.space(8)
+            visible: root.writableCalendars.length > 0
+
+            Repeater {
+              model: root.writableCalendars
+
+              // The same dot the compose form uses, in the calendar's own
+              // colour rather than a character in the foreground one: the
+              // colour is how you tell your calendars apart everywhere else
+              // in this panel, and it would be a poor place to stop.
+              Item {
+                id: importPick
+                required property var modelData
+                readonly property bool chosen: String(importPick.modelData) === root.inboxCalendarName
+                width: importPickRow.width
+                height: importPickRow.height
+
+                Row {
+                  id: importPickRow
+                  spacing: Style.space(5)
+
+                  Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(6)
+                    height: width
+                    radius: width / 2
+                    color: importPick.chosen
+                      ? root.calendarColor(importPick.modelData) : "transparent"
+                    border.width: importPick.chosen ? 0 : Style.spacing.hairline
+                    border.color: root.calendarColor(importPick.modelData)
+                  }
+
+                  Text {
+                    textFormat: Text.PlainText
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.displayName(importPick.modelData)
+                    color: importPick.chosen
+                      ? root.contentForeground
+                      : Qt.darker(root.contentForeground, 2.1)
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  anchors.margins: -Style.space(4)
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.chooseImportCalendar(String(importPick.modelData))
+                }
+              }
+            }
+          }
+
+          Item { width: 1; height: Style.space(6) }
+
+          Row {
+            spacing: Style.space(14)
+
+            Text {
+              readonly property bool ready: root.inboxCalendarName !== ""
+              textFormat: Text.PlainText
+              text: root.importing
+                ? "Adding…"
+                : (ready ? "Add to " + root.displayName(root.inboxCalendarName)
+                  : "Choose a calendar first")
+              color: (ready && inboxAddMouse.containsMouse)
+                ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                : (ready ? root.contentForeground : Qt.darker(root.contentForeground, 2.2))
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+
+              MouseArea {
+                id: inboxAddMouse
+                anchors.fill: parent
+                anchors.margins: -Style.space(4)
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.acceptInbox()
+              }
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              text: "Discard"
+              color: inboxDropMouse.containsMouse
+                ? Style.hoverStateColor(root.contentForeground, Color.accent)
+                : Qt.darker(root.contentForeground, 2.1)
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.caption
+
+              MouseArea {
+                id: inboxDropMouse
+                anchors.fill: parent
+                anchors.margins: -Style.space(4)
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.discardInbox()
               }
             }
           }

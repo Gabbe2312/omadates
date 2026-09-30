@@ -274,6 +274,17 @@ links are put back, so an event whose notes contain markup draws the
 characters it is made of. Only http, https, mailto and tel ever reach a
 handler, and the panel and the helper each check that separately.
 
+**Files dropped on it.** A calendar file downloaded from a web page can be
+dragged onto the clock in the bar, which brings the calendar up ready to take
+it, or onto the calendar itself when it is already open. Dropping stages the
+file and nothing more: the panel then says what is in it and asks which
+calendar, and that press is what writes. Dropping is choosing the file, not
+agreeing to it. The first import asks which calendar outright rather than
+guessing, because the first calendar in your list may be one shared with
+somebody whose phone buzzes for every event on it; after that it remembers.
+Events that arrive without a UID are given one, so a downloaded file cannot
+overwrite an appointment already on the calendar.
+
 **Writes.** Creating and deleting events and calendars, and setting a
 calendar's colour, all go to the server. Every destructive action asks twice
 and says what it costs first. A subscribed feed is somebody else's file and

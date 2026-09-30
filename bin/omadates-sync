@@ -17,6 +17,9 @@ Subcommands (the panel drives all of these; they also work by hand):
     deletecalendar        Remove a calendar, or drop a feed. JSON on stdin.
     map <location>        Open a location in the system's map handler.
     open <url>            Open a link from an event in the system's handler.
+    stage <file.ics>      Hold a calendar file and show the panel what is in it.
+    import <calendar>     Write the held file's events into that calendar.
+    discard               Drop the held file without writing anything.
     subscribe <url>       Add a webcal:// or https://….ics feed, then sync.
     unsubscribe <url>     Drop a feed, then sync.
     check                 Report missing dependencies as JSON. Never fails.
@@ -43,6 +46,11 @@ KEYRING_SERVICE = "io.github.gabbe2312.calendar"
 CONFIG_PATH = Path.home() / ".config" / "omarchy" / APP / "config.json"
 CACHE_PATH = Path.home() / ".cache" / "omarchy" / APP / "events.json"
 TOKENS_PATH = Path.home() / ".cache" / "omarchy" / APP / "sync-tokens.json"
+# A file somebody downloaded, waiting for a yes. Nothing here reaches the
+# server until the panel says so: an .ics that arrived from a web page is a
+# stranger's suggestion, not an instruction.
+INBOX_PATH = Path.home() / ".cache" / "omarchy" / APP / "inbox.ics"
+INBOX_INFO = Path.home() / ".cache" / "omarchy" / APP / "inbox.json"
 
 DEFAULTS = {
     # Apple's CalDAV endpoint. Any other CalDAV server works too: Fastmail,
@@ -102,6 +110,11 @@ MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 MAX_OBJECTS = 20000
 SOURCE_SECONDS = 20
 SYNC_SECONDS = 90
+
+# One file, one sitting. Every event in an import is a separate PUT to the
+# server, so a file with thousands in it is a long wait and almost certainly
+# a mistake; better to say so than to spend ten minutes proving it.
+MAX_IMPORT = 200
 
 REQUIREMENTS = [
     ("caldav", "python-caldav"),
@@ -1020,6 +1033,217 @@ def fail(message):
         pass
     print(f"omadates-sync: {message}", file=sys.stderr)
     return 1
+
+
+# ---------------------------------------------------------------- import
+#
+# Bringing in a .ics somebody downloaded. Two steps on purpose: staging puts
+# the file somewhere private and says what is in it, and importing is the
+# separate press that actually writes to the calendar. A file that lands on
+# the panel by drag, or through "open with", has been chosen but not agreed
+# to, and those are different things.
+
+
+def local_path(raw):
+    """The path a file manager or a drop handed over, as a path."""
+    text = str(raw or "").strip()
+    if text.startswith("file://"):
+        import urllib.parse
+        parsed = urllib.parse.urlparse(text)
+        if parsed.netloc not in ("", "localhost"):
+            raise RuntimeError("that file is on another machine")
+        text = urllib.parse.unquote(parsed.path)
+    if not text:
+        raise RuntimeError("no file given")
+    return Path(text).expanduser()
+
+
+def read_local_ics(path):
+    """The bytes of a local calendar file, up to a limit.
+
+    The user pointed at this one, so following a link to it is their business
+    rather than an attack. What is not their business is a file that turns out
+    to be a device or a pipe, or one large enough to take the machine with it,
+    and both of those are asked of the open file rather than of its name.
+    """
+    fd = os.open(str(path), os.O_RDONLY)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise RuntimeError("that is not a file")
+        if info.st_size > MAX_FEED_BYTES:
+            raise RuntimeError("that calendar file is too large to read")
+    except BaseException:
+        os.close(fd)
+        raise
+    with os.fdopen(fd, "rb") as handle:
+        data = handle.read(MAX_FEED_BYTES + 1)
+    if len(data) > MAX_FEED_BYTES:
+        raise RuntimeError("that calendar file is too large to read")
+    return data
+
+
+def ics_events(data):
+    """Every VEVENT in a calendar file, as components, bounded."""
+    import icalendar
+    try:
+        calendar = icalendar.Calendar.from_ical(data)
+    except Exception:
+        raise RuntimeError("that file is not a calendar this can read")
+    found = []
+    for sub in calendar.walk("VEVENT"):
+        found.append(sub)
+        if len(found) > MAX_IMPORT:
+            raise RuntimeError(f"that file holds more than {MAX_IMPORT} events")
+    if not found:
+        raise RuntimeError("there are no events in that file")
+    return calendar, found
+
+
+def preview_events(components, tz):
+    """What the panel needs to show before anyone agrees to any of it."""
+    shown = []
+    for sub in components:
+        built = build_event(sub, tz, "", "", subscribed=False)
+        if built:
+            shown.append({
+                "summary": built["summary"], "start": built["start"],
+                "end": built["end"], "allDay": built["allDay"],
+                "recurring": built["recurring"],
+            })
+    return shown
+
+
+def writable_calendars():
+    """The names an import could go into, or an empty list when signed out."""
+    config = load_config()
+    username = str(config.get("username") or "").strip()
+    if not username:
+        return []
+    try:
+        return [calendar_name(c, "Calendar")
+                for c in account_calendars(config, username) if takes_events(c)]
+    except Exception:
+        return []
+
+
+def summon_panel():
+    """Bring the calendar up, so a file opened from elsewhere is seen."""
+    import shutil
+    if not shutil.which("omarchy"):
+        return
+    try:
+        subprocess.Popen(
+            ["omarchy", "shell", "-q", KEYRING_SERVICE, "open"],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
+def clear_inbox():
+    for path in (INBOX_PATH, INBOX_INFO):
+        try:
+            dir_fd = open_state_dir(path.parent, create=False)
+        except (OSError, StateNotPrivate):
+            continue
+        unlink_quietly(dir_fd, path.name)
+        os.close(dir_fd)
+
+
+def cmd_stage(args):
+    """Hold a calendar file and tell the panel what is in it."""
+    try:
+        path = local_path(" ".join(args))
+        data = read_local_ics(path)
+        _, components = ics_events(data)
+        shown = preview_events(components, local_tz())
+    except OSError as exc:
+        return fail(f"cannot read that file: {exc.strerror or exc}")
+    except RuntimeError as exc:
+        return fail(str(exc))
+    if not shown:
+        return fail("there are no events in that file")
+
+    write_private(INBOX_PATH, data.decode("utf-8", "replace"))
+    write_private(INBOX_INFO, json.dumps({
+        "name": path.name,
+        "stagedAt": datetime.now(timezone.utc).isoformat(),
+        "events": shown,
+        "calendars": writable_calendars(),
+    }, indent=2, ensure_ascii=False) + "\n")
+    summon_panel()
+    print(f"omadates-sync: {len(shown)} events waiting from {path.name}")
+    return 0
+
+
+def cmd_import(args):
+    """Write the staged file's events into a calendar, on an explicit yes."""
+    import icalendar
+
+    target = " ".join(args).strip()
+    if not target:
+        return fail("no calendar chosen")
+
+    raw = read_private(INBOX_PATH)
+    if not raw:
+        return fail("there is no file waiting")
+    try:
+        _, components = ics_events(raw.encode("utf-8"))
+    except RuntimeError as exc:
+        return fail(str(exc))
+
+    config = load_config()
+    username = str(config.get("username") or "").strip()
+    if not username:
+        return fail("not signed in")
+    try:
+        calendars = account_calendars(config, username)
+    except Exception as exc:
+        return fail(friendly_error(exc))
+
+    for candidate in calendars:
+        if calendar_name(candidate, "") == target:
+            break
+    else:
+        return fail(f"no calendar named '{target}'")
+
+    written, refused = 0, []
+    for sub in components:
+        wrapper = icalendar.Calendar()
+        wrapper.add("prodid", "-//omadates//EN")
+        wrapper.add("version", "2.0")
+        # A file from the web may name no UID at all, or name one it shares
+        # with something already on the calendar. Either way the server is
+        # entitled to a unique one, and inventing it here is better than
+        # silently overwriting an appointment that was already there.
+        if not sub.get("UID"):
+            sub.add("uid", f"{uuid.uuid4()}@omadates")
+        if not sub.get("DTSTAMP"):
+            sub.add("dtstamp", datetime.now(timezone.utc))
+        wrapper.add_component(sub)
+        try:
+            candidate.save_event(wrapper.to_ical().decode())
+            written += 1
+        except Exception as exc:
+            refused.append(f"{clean_line(sub.get('SUMMARY', ''), 60)}: "
+                           f"{friendly_error(exc)}")
+
+    clear_inbox()
+    if written == 0:
+        return fail("; ".join(refused) or "nothing could be written")
+    note = f"omadates-sync: added {written} events to {target}"
+    if refused:
+        note += f" ({len(refused)} refused)"
+    print(note)
+    return cmd_sync()
+
+
+def cmd_discard():
+    """Drop the staged file without writing anything."""
+    clear_inbox()
+    print("omadates-sync: discarded")
+    return 0
 
 
 # ---------------------------------------------------------------- commands
@@ -1956,6 +2180,12 @@ def main(argv):
         return cmd_map(rest)
     if command == "open":
         return cmd_open(rest)
+    if command == "stage":
+        return cmd_stage(rest)
+    if command == "import":
+        return cmd_import(rest)
+    if command == "discard":
+        return cmd_discard()
     if command == "create":
         return cmd_create(rest)
     if command == "delete":

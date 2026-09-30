@@ -186,11 +186,75 @@ BarWidget {
     function toggle(): void { root.togglePanel() }
   }
 
+  // ---- A calendar file dropped on the bar label.
+  //
+  // The same act as dropping on the open panel, from the one part of this
+  // plugin that is always on screen: you do not have to open the calendar to
+  // put something in it. The file is staged, never written, and the panel
+  // comes up to ask which calendar.
+  readonly property string pluginDir: String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "")
+
+  function looksLikeCalendarFile(url) {
+    var text = String(url || "").toLowerCase().replace(/[?#].*$/, "")
+    var kinds = [".ics", ".ical", ".icalendar", ".ifb"]
+    for (var i = 0; i < kinds.length; i++)
+      if (text.slice(-kinds[i].length) === kinds[i]) return true
+    return false
+  }
+
+  function calendarFileIn(drop) {
+    if (!drop || !drop.hasUrls) return ""
+    for (var i = 0; i < drop.urls.length; i++)
+      if (root.looksLikeCalendarFile(drop.urls[i])) return String(drop.urls[i])
+    return ""
+  }
+
+  Process {
+    id: barStageProcess
+  }
+
+  // Opened by a drag rather than by a click, and so closed again once the
+  // drag is over. A panel that opened by itself should not stay.
+  property bool dragOpenedPanel: false
+
+  function panelSaysDragging(value) {
+    if (panelLoader.item && "dragHovering" in panelLoader.item)
+      panelLoader.item.dragHovering = value
+  }
+
+  // Every sign of life from either drop area comes through here, and the
+  // clock starts over. Leaving the bar is a sign of life like any other:
+  // crossing into the panel that just opened means leaving the bar first, and
+  // reading that as "the drag is done" is what made the calendar open, close,
+  // and open again the whole way down. Nothing decides the drag is over
+  // except the silence afterwards.
+  function noteDragActivity() {
+    dragIdleTimer.restart()
+    root.panelSaysDragging(true)
+  }
+
+  function endDrag() {
+    dragIdleTimer.stop()
+    root.panelSaysDragging(false)
+    if (root.dragOpenedPanel) root.close()
+    root.dragOpenedPanel = false
+  }
+
+  Timer {
+    id: dragIdleTimer
+    // A drag that has gone quiet for this long has gone somewhere else, or
+    // was dropped on something that is not this calendar. Either way there is
+    // no longer anything to hold the panel open for.
+    interval: 1200
+    onTriggered: root.endDrag()
+  }
+
   WidgetButton {
     id: button
     anchors.fill: parent
     bar: root.bar
     text: root.vertical ? "" : root.displayText
+    opacity: barDrop.containsDrag ? 0.55 : 1
     labelVisible: !root.vertical
     hasVisualContent: root.vertical ? root.verticalLines.length > 0 : text !== ""
     fixedHeight: root.vertical ? root.verticalLines.length * Style.bar.iconSlot : -1
@@ -201,6 +265,39 @@ BarWidget {
       if (b === Qt.RightButton) root.cycleFormat()
       else if (b === Qt.MiddleButton) { if (root.bar) root.bar.run("omarchy-menu-timezone") }
       else root.togglePanel()
+    }
+
+    // Takes drags only, so the press handling above is untouched. The label
+    // lifts while a file is over it, which is the whole of the feedback a
+    // bar this size has room for.
+    DropArea {
+      id: barDrop
+      anchors.fill: parent
+      anchors.margins: -Style.space(4)
+      onEntered: function(drop) {
+        if (root.calendarFileIn(drop) === "") { drop.accepted = false; return }
+        // The calendar is shut while you are dragging from somewhere else,
+        // which is how it should be, but it means the place to drop is not on
+        // screen. So holding a file over the bar brings it up, already soft
+        // and already saying where the file goes.
+        if (!root.opened) {
+          root.dragOpenedPanel = true
+          root.open()
+        }
+        root.noteDragActivity()
+      }
+      onPositionChanged: root.noteDragActivity()
+      onExited: root.noteDragActivity()
+      onDropped: function(drop) {
+        dragIdleTimer.stop()
+        root.dragOpenedPanel = false
+        root.panelSaysDragging(false)
+        var file = root.calendarFileIn(drop)
+        if (file === "" || barStageProcess.running) return
+        if (!root.opened) root.open()
+        barStageProcess.command = [root.pluginDir + "bin/omadates-sync", "stage", file]
+        barStageProcess.running = true
+      }
     }
 
     Column {
