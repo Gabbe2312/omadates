@@ -291,7 +291,10 @@ finishes without it.
 **Processes.** The panel runs one helper: the `bin/omadates-sync` beside it.
 Each call has a network timeout, only one of each kind runs at a time, and
 anything still going after forty seconds is stopped and reported rather than
-left holding a connection open for the life of the shell.
+left holding a connection open for the life of the shell. A helper that stops
+before it finished is reported too: it never got to write the reason down, so
+the panel says the last calendar on screen is not the current one rather than
+presenting a stale one as fresh.
 
 ## Removing it
 

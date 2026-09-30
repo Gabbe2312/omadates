@@ -239,8 +239,20 @@ Panel {
   // be showing either way.
   readonly property int troubleGrace: 45 * 1000
   property bool troubleSettled: false
-  readonly property string syncTrouble: root.cacheFailed && root.troubleSettled
-    ? (root.cache.error !== "" ? root.cache.error : "Calendar sync failed")
+
+  // A helper that was killed never got to write the reason down. The cache
+  // still says ok, because it is the last good one, and without this the
+  // panel would go on presenting a stale calendar as the current one with
+  // nothing said at all. A non-zero exit is the only evidence there is in
+  // that case, so it counts as a failing sync alongside a cache that says so
+  // itself, and takes the same grace period before it speaks.
+  property bool helperStopped: false
+  readonly property bool syncFailing: root.cacheFailed || root.helperStopped
+  readonly property string syncTrouble: root.syncFailing && root.troubleSettled
+    ? (root.cacheFailed && root.cache.error !== ""
+      ? root.cache.error
+      : (root.cacheFailed ? "Calendar sync failed"
+        : "the calendar helper stopped before it finished"))
     : ""
 
 
@@ -1078,13 +1090,19 @@ Panel {
   Process {
     id: pollProcess
     command: root.syncCommand.concat(["poll"])
+    onStarted: root.helperStopped = false
+    onExited: function(exitCode) { root.helperStopped = exitCode !== 0 }
   }
 
   Process {
     id: syncProcess
     command: root.syncCommand
-    // Nothing to do on exit: the sync rewrites the cache, and the FileView
-    // above is already watching it.
+    // A clean run needs nothing here: it rewrites the cache and the FileView
+    // above is already watching it. The exit code is read for the run that
+    // never got that far, which is the one case the cache cannot report on
+    // its own behalf.
+    onStarted: root.helperStopped = false
+    onExited: function(exitCode) { root.helperStopped = exitCode !== 0 }
   }
 
   // How often to ask in the background. Opening the panel always asks, and
@@ -1142,8 +1160,8 @@ Panel {
 
   // A sync that works resets the ladder, so the next bad patch starts
   // over at five seconds rather than wherever the last one gave up.
-  onCacheFailedChanged: {
-    if (!root.cacheFailed) root.retryDelay = root.retryFloor
+  onSyncFailingChanged: {
+    if (!root.syncFailing) root.retryDelay = root.retryFloor
     // Either way the grace starts over: a fresh failure has not earned the
     // line yet, and one that has just cleared should not leave it behind.
     root.troubleSettled = false
@@ -1154,14 +1172,14 @@ Panel {
   // that drives it. Settling stops it on the next evaluation instead.
   Timer {
     interval: root.troubleGrace
-    running: root.cacheFailed && !root.troubleSettled
+    running: root.syncFailing && !root.troubleSettled
     repeat: true
     onTriggered: root.troubleSettled = true
   }
 
   Timer {
     interval: root.retryDelay
-    running: root.cacheFailed
+    running: root.syncFailing
     repeat: true
     // Only a retry that actually ran counts towards the backoff: one skipped
     // because a sync was already in flight has learned nothing.

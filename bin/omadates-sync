@@ -500,6 +500,14 @@ def dav_client(config, username, password):
     return client
 
 
+def drop_connections(client):
+    """Throw away a CalDAV client's pooled connections."""
+    try:
+        client.session.close()
+    except Exception:
+        pass
+
+
 def account_calendars(config, username):
     """Sign in and list the account's calendars, or raise something readable."""
     password = keyring_lookup(username)
@@ -640,12 +648,22 @@ class Budget:
 
 def collect_caldav(calendar, start, end, tz, name, color, budget):
     """Every VEVENT in the window, recurrences expanded, within the budget."""
+    # split_expanded=False, and it is not a preference. Left at its default,
+    # caldav hands back one object per occurrence, and it builds each one by
+    # copying the object it came from, which serialises the whole component
+    # back to iCalendar text to do it. That is a full re-serialisation per
+    # occurrence of work this function then throws away, because the loop
+    # below walks the VEVENTs out of whatever it is given either way. It is
+    # also the exact frame a crash report arrived on: caldav's copy, into
+    # icalendar's writer, into a segfault inside CPython. Asking not to be
+    # handed the split takes this code out of that path entirely.
+    search = dict(start=start, end=end, event=True, split_expanded=False)
     try:
-        results = calendar.search(start=start, end=end, event=True, expand=True)
+        results = calendar.search(expand=True, **search)
     except Exception:
         # Some servers reject server-side expansion; caldav falls back to
         # doing it locally when recurring-ical-events is installed.
-        results = calendar.search(start=start, end=end, event=True)
+        results = calendar.search(**search)
 
     events = []
     for item in results:
@@ -1819,6 +1837,12 @@ def sync_once():
                         collect_caldav(calendar, start, end, tz, name, colour, budget))
             except SyncTooLong:
                 budget.check_clock()
+                # The clock goes off between two bytecodes, wherever that
+                # lands, and where it landed may well be halfway through
+                # reading a reply. The connection that reply was arriving on
+                # is not in a state anything should reuse, so the pool goes
+                # and the next calendar opens its own.
+                drop_connections(calendar.client)
                 problems.append(f"{name}: took too long to read and was left out")
             except Exception as exc:
                 problems.append(f"{name}: {friendly_error(exc)}")
