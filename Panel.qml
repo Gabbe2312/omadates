@@ -583,15 +583,37 @@ Panel {
   // was abandoned somewhere else and the panel goes back to being a calendar.
   // Only the look is dropped here; the panel itself stays, and a click puts
   // it away the way a click always has.
+  // The drag is over one of the two places that care, or it is not, and both
+  // places say so. Leaving one of them is not the end of it, because crossing
+  // from the bar to the month means leaving the bar first, so a departure
+  // waits a moment to see whether the other one picks it up.
+  function dragEntered() {
+    dragLeaving.stop()
+    dragForgotten.restart()
+    root.dragHovering = true
+  }
+
+  function dragLeft() {
+    dragLeaving.restart()
+  }
+
+  Timer {
+    id: dragLeaving
+    // Long enough to cross the gap between the bar and the panel below it,
+    // and short enough that taking a file away puts the calendar back before
+    // you have finished looking at it.
+    interval: 400
+    onTriggered: root.dragHovering = false
+  }
+
   Timer {
     id: dragForgotten
-    // Long, because this is not timing anything. It is the way out for a
-    // drag that was abandoned somewhere the panel cannot see, and the whole
-    // point of the soft month and the glyph is that they are up before the
-    // pointer arrives, telling you where to bring it. A short clock here
-    // takes the instruction away while you are still reading it.
+    // The way out for a drag that ended somewhere neither area can see, which
+    // leaves no departure behind it at all. Counted from the last time the
+    // drag was seen rather than from where it is now: asking containsDrag is
+    // what left the soft month and the glyph up for good, since an area the
+    // drag never formally left goes on claiming to hold it.
     interval: 8000
-    running: root.dragHovering && !panelDrop.containsDrag && !root.stagePending
     onTriggered: root.dragHovering = false
   }
   // So the bar widget can tell whether the drag is over here rather than
@@ -1400,12 +1422,9 @@ Panel {
         anchors.fill: parent
         onEntered: function(drop) {
           if (root.calendarFileIn(drop) === "") { drop.accepted = false; return }
-          root.dragHovering = true
+          root.dragEntered()
         }
-        // Leaving this area is not the end of anything: the pointer may be on
-        // its way back up to the bar, or across the month to a better spot.
-        // The affordance belongs to the drag, which is still happening, not
-        // to whether the pointer is inside one particular rectangle.
+        onExited: root.dragLeft()
         onDropped: function(drop) {
           root.dragHovering = false
           // The bar widget opened this panel for the drag and holds a timer
@@ -3646,10 +3665,14 @@ Panel {
       // sheet so the sheet draws over it and keeps its own presses.
       MouseArea {
         anchors.fill: parent
-        visible: root.inboxWaiting
+        // Both states, not just the question. A month gone soft behind a file
+        // glyph is no more clickable than one behind a sheet, and letting a
+        // press through to a day you cannot read is the kind of thing that
+        // gets found out later by whoever pressed it.
+        visible: root.inboxWaiting || root.showingDropSurface
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
-        onClicked: root.discardInbox()
+        onClicked: if (root.inboxWaiting) root.discardInbox()
         onWheel: function(wheel) { wheel.accepted = true }
       }
 

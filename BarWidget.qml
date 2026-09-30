@@ -224,6 +224,11 @@ BarWidget {
   // The cost is honest. Change your mind and drop the file somewhere else and
   // the calendar stays up until you click, because it cannot be told that the
   // drag ended. Clicking anywhere dismisses it, as it always did.
+  function tellPanel(what) {
+    var target = panelLoader.item
+    if (target && typeof target[what] === "function") target[what]()
+  }
+
   function noteDrop() {
     if (panelLoader.item && "dragHovering" in panelLoader.item)
       panelLoader.item.dragHovering = false
@@ -262,9 +267,13 @@ BarWidget {
       onEntered: function(drop) {
         if (root.calendarFileIn(drop) === "") { drop.accepted = false; return }
         if (!root.opened) root.open()
-        if (panelLoader.item && "dragHovering" in panelLoader.item)
-          panelLoader.item.dragHovering = true
+        root.tellPanel("dragEntered")
       }
+      // Taking the file away again puts the calendar back. Not while the
+      // pointer is still up here, and not the instant it leaves either: it
+      // may be on its way down into the panel, which it can only do by
+      // leaving the bar first.
+      onExited: root.tellPanel("dragLeft")
       onDropped: function(drop) {
         root.noteDrop()
         var file = root.calendarFileIn(drop)
