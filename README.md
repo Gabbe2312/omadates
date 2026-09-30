@@ -283,7 +283,9 @@ agreeing to it. The first import asks which calendar outright rather than
 guessing, because the first calendar in your list may be one shared with
 somebody whose phone buzzes for every event on it; after that it remembers.
 Events that arrive without a UID are given one, so a downloaded file cannot
-overwrite an appointment already on the calendar.
+overwrite an appointment already on the calendar. While the question is up
+nothing behind it can be pressed, and Escape or a press outside puts the file
+away without writing anything.
 
 **Writes.** Creating and deleting events and calendars, and setting a
 calendar's colour, all go to the server. Every destructive action asks twice

@@ -622,6 +622,11 @@ Panel {
     stageProcess.running = true
   }
 
+  // The drop ends the drag, and ending a drag hands focus back to whatever
+  // you dragged from, which dismisses this panel. So the arrival of a staged
+  // file brings it back rather than leaving the answer somewhere unseen.
+  onInboxWaitingChanged: if (root.inboxWaiting && !root.opened) root.open()
+
   function acceptInbox() {
     if (root.importing || root.inboxCalendarName === "") return
     root.importing = true
@@ -1318,11 +1323,17 @@ Panel {
       blocked: root.editingLife || root.addingSubscription
         || root.calendarEditing !== "" || root.signInVisible || root.composing
       onMoveRequested: function(dx, dy) {
+        // The month is behind a question right now, and moving it under there
+        // would only mean finding it somewhere else afterwards.
+        if (root.inboxWaiting) return
         if (dx !== 0) root.moveMonth(dx)
         if (dy !== 0) root.moveYear(dy)
       }
-      onActivateRequested: root.goToToday()
-      onCloseRequested: root.close()
+      onActivateRequested: if (!root.inboxWaiting) root.goToToday()
+      // Escape answers the nearest question. While a file is waiting that is
+      // the file, not the calendar: closing the panel out from under it would
+      // leave the thing staged with no way back to it but another drop.
+      onCloseRequested: root.inboxWaiting ? root.discardInbox() : root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(t) {
         if (t === "[") root.moveMonth(-1)
@@ -3543,6 +3554,18 @@ Panel {
             font.pixelSize: Style.font.body
           }
         }
+      }
+
+      // Nothing behind this is reachable while the question is up, and a
+      // press anywhere out here is the answer "not now". Declared before the
+      // sheet so the sheet draws over it and keeps its own presses.
+      MouseArea {
+        anchors.fill: parent
+        visible: root.inboxWaiting
+        hoverEnabled: true
+        acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+        onClicked: root.discardInbox()
+        onWheel: function(wheel) { wheel.accepted = true }
       }
 
       Rectangle {

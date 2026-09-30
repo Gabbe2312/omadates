@@ -1114,19 +1114,6 @@ def preview_events(components, tz):
     return shown
 
 
-def writable_calendars():
-    """The names an import could go into, or an empty list when signed out."""
-    config = load_config()
-    username = str(config.get("username") or "").strip()
-    if not username:
-        return []
-    try:
-        return [calendar_name(c, "Calendar")
-                for c in account_calendars(config, username) if takes_events(c)]
-    except Exception:
-        return []
-
-
 def summon_panel():
     """Bring the calendar up, so a file opened from elsewhere is seen."""
     import shutil
@@ -1152,7 +1139,14 @@ def clear_inbox():
 
 
 def cmd_stage(args):
-    """Hold a calendar file and tell the panel what is in it."""
+    """Hold a calendar file and tell the panel what is in it.
+
+    Nothing here touches the network. This runs between a file leaving your
+    hand and the panel answering, so it has to be over before you notice it
+    happened. Asking the server which calendars accept events took nearly two
+    seconds of that, and for nothing: the panel has the same list in the cache
+    it is already drawing from.
+    """
     try:
         path = local_path(" ".join(args))
         data = read_local_ics(path)
@@ -1170,7 +1164,6 @@ def cmd_stage(args):
         "name": path.name,
         "stagedAt": datetime.now(timezone.utc).isoformat(),
         "events": shown,
-        "calendars": writable_calendars(),
     }, indent=2, ensure_ascii=False) + "\n")
     summon_panel()
     print(f"omadates-sync: {len(shown)} events waiting from {path.name}")
