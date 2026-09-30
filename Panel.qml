@@ -607,9 +607,21 @@ Panel {
 
   Timer {
     id: dragForgotten
-    interval: 5000
+    // Long, and it has to be. The bar cannot report that a file is still
+    // being held: one movement event arrives for a sweep the width of the
+    // screen, so there is no pulse to keep this at bay. Five seconds put the
+    // month back while the file was still in the air over it. This is the
+    // outer edge of holding a file still, not a guess at how long a drag
+    // lasts, and the two ways out below are what usually get there first.
+    interval: 45000
     onTriggered: root.dragHovering = false
   }
+
+  // A closed calendar has nothing over it. Said here because the other way
+  // out of an abandoned drag is a click, and a click closes this panel: the
+  // soft month would otherwise still be waiting behind it the next time it
+  // opened, which is exactly how it used to get stuck.
+  onOpenedChanged: if (!root.opened && !root.inboxWaiting) root.dragHovering = false
   // So the bar widget can tell whether the drag is over here rather than
   // guessing from movement it may never see.
   readonly property alias dragInside: panelDrop.containsDrag

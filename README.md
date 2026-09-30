@@ -275,12 +275,12 @@ characters it is made of. Only http, https, mailto and tel ever reach a
 handler, and the panel and the helper each check that separately.
 
 **Files dropped on it.** A calendar file downloaded from a web page can be
-dropped on the top bar, where the clock says it will take it, or onto the
-calendar itself when it is already open. The bar does not open the calendar
-while you are still holding the file: a Wayland client is given no pointer
-position during a drag, so the bar cannot tell a file held over the clock
-from one carried across the far edge of the screen, and cannot tell that one
-is still being held at all. The calendar comes up once the file has landed. Dropping stages the
+dropped on the top bar, which brings the calendar up ready to take it, or
+onto the calendar itself when it is already open. Holding a file over the bar
+anywhere does it, not only over the clock: a Wayland client is given no
+pointer position during a drag, so the bar is told a file has arrived but
+never where along itself it is. Reaching too far is the lesser fault, and it
+keeps the calendar in front of you with somewhere plain to drop. Dropping stages the
 file and nothing more: the panel then says what is in it and asks which
 calendar, and that press is what writes. Dropping is choosing the file, not
 agreeing to it. The first import asks which calendar outright rather than

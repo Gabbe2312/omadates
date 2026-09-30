@@ -266,27 +266,21 @@ BarWidget {
       // whatever shape it is given, and a smaller one would only refuse
       // drops that would have worked.
       anchors.fill: parent
-      // Only the label changes. Opening the calendar from here was tried and
-      // measured and cannot be made to work: Wayland gives a client no
-      // pointer position while a drag is in flight, so this area is told the
-      // drag arrived with the position filled in as its own centre, and then
-      // told almost nothing else. One movement event arrived during a sweep
-      // from one end of the bar to the other.
-      //
-      // Blind in both the ways that matter, then. It cannot tell a file held
-      // over the clock from one carried across the far edge of the bar, so
-      // the calendar sprang open for anything crossing the top of the screen.
-      // And it cannot tell that a file is still being held, so the calendar
-      // went back to normal with the file still in the air above it.
-      //
-      // What it can do is take a drop, and say that it will.
+      // Opens the calendar so the file has somewhere to go, and does it for
+      // a file held anywhere along the bar rather than only over the clock.
+      // Not a choice: a Wayland client is given no pointer position during a
+      // drag, so this area is told the drag arrived with the position filled
+      // in as its own centre, to the pixel, every time. It cannot tell where
+      // along the bar the file is, and a narrower target would only refuse
+      // drops that work. Reaching too far is the lesser fault, and the one
+      // that leaves the preview on screen where it earns its keep.
       onEntered: function(drop) {
-        if (root.calendarFileIn(drop) === "") drop.accepted = false
+        if (root.calendarFileIn(drop) === "") { drop.accepted = false; return }
+        if (!root.opened) root.open()
+        var target = panelLoader.item
+        if (target && typeof target.dragEntered === "function") target.dragEntered()
       }
-      // No onExited, on purpose. Opening the panel takes the drag off this
-      // widget straight away, so the departure arrives with the file still
-      // held over the bar and means nothing at all. The month knows when a
-      // file leaves it, and that is the one worth acting on.
+
       onDropped: function(drop) {
         root.noteDrop()
         var file = root.calendarFileIn(drop)
