@@ -1175,6 +1175,62 @@ def desktop_entry():
     )
 
 
+def mimeapps_path():
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "mimeapps.list"
+
+
+def edit_mimeapps(add):
+    """Put our entry in, or take every trace of it out.
+
+    Two sections matter and they answer different questions. [Default
+    Applications] decides what a double click does; [Added Associations]
+    decides what appears in a file manager's "Open with" list. Installing
+    needs the second (xdg-mime writes the first), and removing has to clear
+    both, or the desktop goes on pointing a double click at a file that is no
+    longer there and nothing opens at all.
+    """
+    path = mimeapps_path()
+    interesting = ("[Default Applications]", "[Added Associations]")
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+    except OSError:
+        return
+
+    out, section, added = [], "", False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped
+            out.append(line)
+            if add and section == "[Added Associations]" and not added:
+                out.append(f"{CALENDAR_MIME}={DESKTOP_ID};")
+                added = True
+            continue
+        # Our own line for this type, wherever it sits: dropped either way,
+        # so installing twice cannot leave the file saying two things and
+        # removing cannot leave half of it behind.
+        if (section in interesting
+                and stripped.startswith(CALENDAR_MIME + "=")
+                and DESKTOP_ID in stripped):
+            continue
+        out.append(line)
+
+    if add and not added:
+        if out and out[-1].strip():
+            out.append("")
+        out.append("[Added Associations]")
+        out.append(f"{CALENDAR_MIME}={DESKTOP_ID};")
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(out).rstrip("\n") + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
 def handler_is_ours():
     try:
         result = subprocess.run(["xdg-mime", "query", "default", CALENDAR_MIME],
@@ -1225,6 +1281,7 @@ def cmd_handler(args):
             pass
         except OSError as exc:
             return fail(f"could not remove the file handler: {exc}")
+        edit_mimeapps(add=False)
         refresh_desktop_database(folder)
         touch_cache_state()
         print("omadates-sync: no longer opens calendar files")
@@ -1235,18 +1292,22 @@ def cmd_handler(args):
               file=sys.stderr)
         return 2
 
-    if not shutil.which("xdg-mime"):
-        return fail("xdg-mime is not installed")
     folder.mkdir(parents=True, exist_ok=True)
     entry.write_text(desktop_entry(), encoding="utf-8")
     entry.chmod(0o644)
     refresh_desktop_database(folder)
+    edit_mimeapps(add=True)
     try:
         subprocess.run(["xdg-mime", "default", DESKTOP_ID, CALENDAR_MIME],
                        capture_output=True, timeout=10)
     except Exception as exc:
         return fail(f"could not become the default: {exc}")
     touch_cache_state()
+    # Asked back rather than assumed. Another entry can claim the type at the
+    # same moment, and saying it worked when it did not is worse than saying
+    # nothing: the next .ics opens somewhere else and nobody knows why.
+    if not handler_is_ours():
+        return fail("something else still opens calendar files on this machine")
     print("omadates-sync: calendar files now open here")
     return 0
 

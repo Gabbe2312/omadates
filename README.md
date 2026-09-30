@@ -292,8 +292,10 @@ manager opens a `.ics` with, and double-clicking one then brings it here
 rather than into a text editor. It is a press in the panel and never
 something installation does: registering for a file type writes a desktop
 entry outside this plugin's own directory and changes what the rest of your
-system does with those files. The same press turns it off again and puts back
-what was there.
+system does with those files. The same press turns it off again and takes every
+trace of it back out, so a double click does not end up pointing at a file
+that is no longer there. It is offered whether or not you have signed in:
+which program opens a calendar file is a question about the machine.
 
 **Writes.** Creating and deleting events and calendars, and setting a
 calendar's colour, all go to the server. Every destructive action asks twice

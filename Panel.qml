@@ -1457,6 +1457,12 @@ Panel {
           blur: 1.0
           blurMax: 48
           saturation: -0.3
+          // Without this the effect grows the item by blurMax on every side
+          // to give the blur somewhere to spread, and the panel is not the
+          // only thing on screen: the spread reached over the bar above and
+          // past the corners below. The month is clipped to the card, so the
+          // blur of it should be too.
+          autoPaddingEnabled: false
         }
         interactive: contentHeight > height || contentWidth > width
 
@@ -3075,7 +3081,10 @@ Panel {
                   anchors.right: accountAction.left
                   anchors.rightMargin: Style.space(12)
                   anchors.verticalCenter: accountAction.verticalCenter
-                  visible: root.configured
+                  // Not behind having an account. Which program opens a
+                  // calendar file is a question about this machine, and it
+                  // makes as much sense to answer before signing in as after.
+                  visible: true
                   text: root.switchingHandler
                     ? "…"
                     : (root.opensFiles ? "Opens .ics files" : "Open .ics files here")
@@ -3751,7 +3760,7 @@ Panel {
           }
 
           Row {
-            spacing: Style.space(8)
+            spacing: Style.space(16)
             visible: root.writableCalendars.length > 0
 
             Repeater {
@@ -3768,18 +3777,23 @@ Panel {
                 width: importPickRow.width
                 height: importPickRow.height
 
+                // Larger than the same control in the compose form, on
+                // purpose. There you are looking at a calendar you already
+                // chose; here you are being asked which one a file full of
+                // somebody else's events should land in, and the answer has
+                // to be readable at a glance rather than squinted at.
                 Row {
                   id: importPickRow
-                  spacing: Style.space(5)
+                  spacing: Style.space(7)
 
                   Rectangle {
                     anchors.verticalCenter: parent.verticalCenter
-                    width: Style.space(6)
+                    width: Style.space(10)
                     height: width
                     radius: width / 2
                     color: importPick.chosen
                       ? root.calendarColor(importPick.modelData) : "transparent"
-                    border.width: importPick.chosen ? 0 : Style.spacing.hairline
+                    border.width: importPick.chosen ? 0 : Math.max(1, Style.space(1))
                     border.color: root.calendarColor(importPick.modelData)
                   }
 
@@ -3789,9 +3803,10 @@ Panel {
                     text: root.displayName(importPick.modelData)
                     color: importPick.chosen
                       ? root.contentForeground
-                      : Qt.darker(root.contentForeground, 2.1)
+                      : Qt.darker(root.contentForeground, 1.7)
                     font.family: root.contentFontFamily
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.bodySmall
+                    font.bold: importPick.chosen
                   }
                 }
 
