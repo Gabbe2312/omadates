@@ -262,8 +262,15 @@ BarWidget {
     // bar this size has room for.
     DropArea {
       id: barDrop
-      anchors.fill: parent
-      anchors.margins: -Style.space(4)
+      // The clock itself, not the whole slot the bar handed this widget. The
+      // slot is wider than the words in it and this used to take all of it
+      // and a little more besides, so a file carried anywhere along the top
+      // of the screen opened the calendar on its way past.
+      anchors.centerIn: parent
+      width: button.labelWidth > 0
+        ? button.labelWidth + Style.space(6)
+        : parent.width
+      height: parent.height
       onEntered: function(drop) {
         if (root.calendarFileIn(drop) === "") { drop.accepted = false; return }
         if (!root.opened) root.open()
