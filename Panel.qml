@@ -583,37 +583,31 @@ Panel {
   // was abandoned somewhere else and the panel goes back to being a calendar.
   // Only the look is dropped here; the panel itself stays, and a click puts
   // it away the way a click always has.
-  // The drag is over one of the two places that care, or it is not, and both
-  // places say so. Leaving one of them is not the end of it, because crossing
-  // from the bar to the month means leaving the bar first, so a departure
-  // waits a moment to see whether the other one picks it up.
+  // Arrival is arrival wherever it comes from. Departure is not: the two
+  // places that report one are not reporting the same thing.
+  //
+  // The month knows when a file leaves it, because the pointer really did
+  // leave, so that ends the soft backdrop at once. Waiting even a moment
+  // there is felt as the calendar being slow to come back.
+  //
+  // The bar does not know. An open panel owns every pixel of pointer input,
+  // so the bar is told the drag left the instant the panel appears, with the
+  // file still held exactly where it was. Acting on that is what made the
+  // blur show and vanish again while nothing had moved. What covers a file
+  // carried away from the bar without ever coming down is the stop below,
+  // restarted every time the drag is genuinely seen.
   function dragEntered() {
-    dragLeaving.stop()
     dragForgotten.restart()
     root.dragHovering = true
   }
 
-  function dragLeft() {
-    dragLeaving.restart()
-  }
-
-  Timer {
-    id: dragLeaving
-    // Long enough to cross the gap between the bar and the panel below it,
-    // and short enough that taking a file away puts the calendar back before
-    // you have finished looking at it.
-    interval: 400
-    onTriggered: root.dragHovering = false
+  function dragLeftMonth() {
+    root.dragHovering = false
   }
 
   Timer {
     id: dragForgotten
-    // The way out for a drag that ended somewhere neither area can see, which
-    // leaves no departure behind it at all. Counted from the last time the
-    // drag was seen rather than from where it is now: asking containsDrag is
-    // what left the soft month and the glyph up for good, since an area the
-    // drag never formally left goes on claiming to hold it.
-    interval: 8000
+    interval: 5000
     onTriggered: root.dragHovering = false
   }
   // So the bar widget can tell whether the drag is over here rather than
@@ -1420,11 +1414,27 @@ Panel {
       DropArea {
         id: panelDrop
         anchors.fill: parent
+        // Opening the panel hands this area the drag and takes it away again
+        // in the same breath, with the file still held motionless over the
+        // bar. That pair is two milliseconds long. A hand carrying a file out
+        // of the month takes the better part of two hundred, so the two are
+        // told apart by how long the drag was in here, and nothing else.
+        //
+        // Asking whether the pointer moved was the obvious test and it does
+        // not work: a position arrives with the enter itself, so the phantom
+        // looks like movement too.
+        readonly property int settleMs: 80
+        property double enteredAt: 0
+
         onEntered: function(drop) {
           if (root.calendarFileIn(drop) === "") { drop.accepted = false; return }
+          panelDrop.enteredAt = Date.now()
           root.dragEntered()
         }
-        onExited: root.dragLeft()
+        // Still instant for a real one: the test costs no waiting, it only
+        // refuses to believe a departure that cannot have been made by a hand.
+        onExited: if (Date.now() - panelDrop.enteredAt >= panelDrop.settleMs)
+          root.dragLeftMonth()
         onDropped: function(drop) {
           root.dragHovering = false
           // The bar widget opened this panel for the drag and holds a timer

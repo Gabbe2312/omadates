@@ -269,11 +269,10 @@ BarWidget {
         if (!root.opened) root.open()
         root.tellPanel("dragEntered")
       }
-      // Taking the file away again puts the calendar back. Not while the
-      // pointer is still up here, and not the instant it leaves either: it
-      // may be on its way down into the panel, which it can only do by
-      // leaving the bar first.
-      onExited: root.tellPanel("dragLeft")
+      // No onExited, on purpose. Opening the panel takes the drag off this
+      // widget straight away, so the departure arrives with the file still
+      // held over the bar and means nothing at all. The month knows when a
+      // file leaves it, and that is the one worth acting on.
       onDropped: function(drop) {
         root.noteDrop()
         var file = root.calendarFileIn(drop)
