@@ -287,15 +287,20 @@ overwrite an appointment already on the calendar. While the question is up
 nothing behind it can be pressed, and Escape or a press outside puts the file
 away without writing anything.
 
-**Opening a calendar file.** The panel can offer to become what your file
-manager opens a `.ics` with, and double-clicking one then brings it here
-rather than into a text editor. It is a press in the panel and never
-something installation does: registering for a file type writes a desktop
-entry outside this plugin's own directory and changes what the rest of your
-system does with those files. The same press turns it off again and takes every
-trace of it back out, so a double click does not end up pointing at a file
-that is no longer there. It is offered whether or not you have signed in:
-which program opens a calendar file is a question about the machine.
+**Opening a calendar file.** Double-clicking a calendar file brings it here
+rather than into a text editor. It covers `.ics`, `.ical`, `.icalendar`,
+`.ifb` and `.vcs`, and the two other names the same type goes by,
+`text/x-vcalendar` and `application/ics`, because which one a file arrives
+labelled with is not something anyone should have to think about.
+
+This happens on its own, the way it does for any installed application: an
+entry of its own alongside the others, adding nothing and replacing nothing.
+An app appears in a file manager's "Open with" because its package dropped a
+desktop entry in place, and a plugin living in a config directory has no
+package to do that for it. Whether it is the one that opens these files by
+default is the desktop's business and yours, changed where you change it for
+anything else; `omadates-sync handler install` and `remove` are there if you
+would rather say it outright.
 
 **Writes.** Creating and deleting events and calendars, and setting a
 calendar's colour, all go to the server. Every destructive action asks twice

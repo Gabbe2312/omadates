@@ -947,11 +947,6 @@ def cache_state():
                       or bool(config.get("subscriptions")),
         "signedIn": bool(str(config.get("username") or "").strip()),
         "missing": missing_dependencies(),
-        # Whether this is what the desktop opens a .ics with. Read rather than
-        # remembered: the setting lives in the desktop's own database and can
-        # be changed from anywhere, so a copy kept here would go stale and
-        # offer to turn on something that is already on.
-        "opensFiles": handler_is_ours(),
     }
 
 
@@ -1151,7 +1146,12 @@ def clear_inbox():
 # and never on installation. Removing it puts back exactly what was there.
 
 DESKTOP_ID = KEYRING_SERVICE + ".desktop"
+# One type with two aliases, which different programs and files use
+# interchangeably. Registering for the canonical name alone leaves a file
+# labelled application/ics opening somewhere else for no reason a user could
+# ever work out.
 CALENDAR_MIME = "text/calendar"
+CALENDAR_MIMES = ("text/calendar", "text/x-vcalendar", "application/ics")
 
 
 def applications_dir():
@@ -1170,7 +1170,7 @@ def desktop_entry():
         f"Exec={helper} stage %f\n"
         "Terminal=false\n"
         "NoDisplay=false\n"
-        f"MimeType={CALENDAR_MIME};\n"
+        f"MimeType={';'.join(CALENDAR_MIMES)};\n"
         "Categories=Office;Calendar;\n"
     )
 
@@ -1231,6 +1231,31 @@ def edit_mimeapps(add):
         pass
 
 
+def clear_default_lines():
+    """Drop our [Default Applications] lines, leaving the association alone."""
+    path = mimeapps_path()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    out, section = [], ""
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped
+            out.append(line)
+            continue
+        if (section == "[Default Applications]"
+                and DESKTOP_ID in stripped
+                and stripped.split("=", 1)[0].strip() in CALENDAR_MIMES):
+            continue
+        out.append(line)
+    try:
+        path.write_text("\n".join(out).rstrip("\n") + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
 def handler_is_ours():
     try:
         result = subprocess.run(["xdg-mime", "query", "default", CALENDAR_MIME],
@@ -1259,8 +1284,38 @@ def touch_cache_state():
         pass
 
 
+def ensure_desktop_entry():
+    """Put this in the list of things that can open a calendar file.
+
+    An installed application appears in a file manager's "Open with" because
+    its package dropped a desktop entry in place, and it does that without
+    asking anybody. A plugin is a git checkout in a config directory and has
+    no package to do it, so it does it here, on the same terms: an entry of
+    its own alongside the others, adding nothing and replacing nothing.
+
+    Being the default is a different matter and stays behind a press, because
+    that one takes the file type off whatever holds it now.
+    """
+    folder = applications_dir()
+    entry = folder / DESKTOP_ID
+    wanted = desktop_entry()
+    try:
+        if entry.read_text(encoding="utf-8") == wanted:
+            return
+    except OSError:
+        pass
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        entry.write_text(wanted, encoding="utf-8")
+        entry.chmod(0o644)
+    except OSError:
+        return
+    edit_mimeapps(add=True)
+    refresh_desktop_database(folder)
+
+
 def cmd_handler(args):
-    """Register, or stop registering, as something that opens calendar files."""
+    """Become, or stop being, what a calendar file opens with by default."""
     import shutil
 
     action = (args[0] if args else "status").strip().lower()
@@ -1275,16 +1330,20 @@ def cmd_handler(args):
         return 0
 
     if action == "remove":
-        try:
-            entry.unlink()
-        except FileNotFoundError:
-            pass
-        except OSError as exc:
-            return fail(f"could not remove the file handler: {exc}")
-        edit_mimeapps(add=False)
-        refresh_desktop_database(folder)
+        # The entry itself stays: it is what lets this be chosen by hand, and
+        # it goes back on its own anyway. What is given up is only the claim
+        # to open these files when nobody chose anything.
+        import shutil
+        if shutil.which("xdg-mime"):
+            for mime in CALENDAR_MIMES:
+                try:
+                    subprocess.run(["xdg-mime", "default", "", mime],
+                                   capture_output=True, timeout=10)
+                except Exception:
+                    pass
+        clear_default_lines()
         touch_cache_state()
-        print("omadates-sync: no longer opens calendar files")
+        print("omadates-sync: no longer the default for calendar files")
         return 0
 
     if action != "install":
@@ -1292,14 +1351,11 @@ def cmd_handler(args):
               file=sys.stderr)
         return 2
 
-    folder.mkdir(parents=True, exist_ok=True)
-    entry.write_text(desktop_entry(), encoding="utf-8")
-    entry.chmod(0o644)
-    refresh_desktop_database(folder)
-    edit_mimeapps(add=True)
+    ensure_desktop_entry()
     try:
-        subprocess.run(["xdg-mime", "default", DESKTOP_ID, CALENDAR_MIME],
-                       capture_output=True, timeout=10)
+        for mime in CALENDAR_MIMES:
+            subprocess.run(["xdg-mime", "default", DESKTOP_ID, mime],
+                           capture_output=True, timeout=10)
     except Exception as exc:
         return fail(f"could not become the default: {exc}")
     touch_cache_state()
@@ -1308,7 +1364,7 @@ def cmd_handler(args):
     # nothing: the next .ics opens somewhere else and nobody knows why.
     if not handler_is_ours():
         return fail("something else still opens calendar files on this machine")
-    print("omadates-sync: calendar files now open here")
+    print("omadates-sync: calendar files now open here by default")
     return 0
 
 
@@ -2334,6 +2390,7 @@ def tighten_existing_state():
 
 def main(argv):
     tighten_existing_state()
+    ensure_desktop_entry()
     command = argv[0] if argv else "sync"
     rest = argv[1:]
     if command in ("-h", "--help", "help"):

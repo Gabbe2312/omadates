@@ -196,7 +196,7 @@ BarWidget {
 
   function looksLikeCalendarFile(url) {
     var text = String(url || "").toLowerCase().replace(/[?#].*$/, "")
-    var kinds = [".ics", ".ical", ".icalendar", ".ifb"]
+    var kinds = [".ics", ".ical", ".icalendar", ".ifb", ".vcs"]
     for (var i = 0; i < kinds.length; i++)
       if (text.slice(-kinds[i].length) === kinds[i]) return true
     return false

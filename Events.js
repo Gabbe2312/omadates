@@ -163,8 +163,7 @@ function parseCache(text) {
     // The helper states these on every write so the panel can tell "never
     // signed in" from "packages missing" from "the network is down", and each
     // has a different next step for whoever is looking at it.
-    configured: false, signedIn: false, missing: [], calendars: [],
-    opensFiles: false
+    configured: false, signedIn: false, missing: [], calendars: []
   }
   var raw = String(text || "").replace(/^\s+|\s+$/g, "")
   if (raw === "") return empty
@@ -193,7 +192,6 @@ function parseCache(text) {
     calendars: normalizeCalendars(parsed.calendars),
     signedIn: parsed.signedIn === true,
     missing: parsed.missing instanceof Array ? parsed.missing : [],
-    opensFiles: parsed.opensFiles === true,
     events: events
   }
 }

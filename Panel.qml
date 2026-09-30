@@ -165,19 +165,7 @@ Panel {
   }
   readonly property var missingPackages: cache.missing instanceof Array ? cache.missing : []
 
-  // Whether a .ics opened from a file manager comes here. Registering for a
-  // file type is a change to the desktop outside this plugin's own directory,
-  // so it is a press rather than something installation does behind your back.
-  readonly property bool opensFiles: cache.opensFiles === true
-  property bool switchingHandler: false
 
-  function toggleFileHandler() {
-    if (root.switchingHandler) return
-    root.switchingHandler = true
-    handlerProcess.command = root.syncCommand.concat(
-      ["handler", root.opensFiles ? "remove" : "install"])
-    handlerProcess.running = true
-  }
 
   // Which calendar's swatches are open, and whether the URL field is up.
   // Only one of the two rows shows at a time. They occupy the same slot
@@ -630,7 +618,7 @@ Panel {
     root.persistSettings({ importCalendar: root.inboxCalendar })
   }
 
-  readonly property var calendarFileTypes: [".ics", ".ical", ".icalendar", ".ifb"]
+  readonly property var calendarFileTypes: [".ics", ".ical", ".icalendar", ".ifb", ".vcs"]
 
   function looksLikeCalendarFile(url) {
     var text = String(url || "").toLowerCase().replace(/[?#].*$/, "")
@@ -1136,14 +1124,6 @@ Panel {
 
   Process {
     id: discardProcess
-  }
-
-  Process {
-    id: handlerProcess
-    onExited: {
-      root.switchingHandler = false
-      calendarCache.reload()
-    }
   }
 
   FileView {
@@ -3098,47 +3078,6 @@ Panel {
                 //      the event count rather than trailing the calendars. It
                 //      concerns the whole account rather than any one calendar,
                 //      and the switches read cleaner without it among them.
-                // ---- Whether a calendar file opened from a file manager
-                //      lands here. Under the account action because it is the
-                //      same kind of thing: about this installation rather than
-                //      about any one calendar.
-                Text {
-                  id: handlerAction
-                  textFormat: Text.PlainText
-                  anchors.right: accountAction.left
-                  anchors.rightMargin: Style.space(12)
-                  anchors.verticalCenter: accountAction.verticalCenter
-                  // Not behind having an account. Which program opens a
-                  // calendar file is a question about this machine, and it
-                  // makes as much sense to answer before signing in as after.
-                  visible: true
-                  text: root.switchingHandler
-                    ? "…"
-                    : (root.opensFiles ? "Opens .ics files" : "Open .ics files here")
-                  color: handlerMouse.containsMouse
-                    ? Style.hoverStateColor(root.contentForeground, Color.accent)
-                    : Qt.darker(root.contentForeground, root.opensFiles ? 1.8 : 2.4)
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.caption
-
-                  MouseArea {
-                    id: handlerMouse
-                    anchors.fill: parent
-                    anchors.margins: -Style.space(4)
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.toggleFileHandler()
-                  }
-
-                  PanelToolTip {
-                    visible: handlerMouse.containsMouse
-                    text: root.opensFiles
-                      ? "Stop opening calendar files with Omadates"
-                      : "Double-clicking a .ics will bring it here"
-                    fontFamily: root.contentFontFamily
-                  }
-                }
-
                 Text {
                   id: accountAction
                   textFormat: Text.PlainText
