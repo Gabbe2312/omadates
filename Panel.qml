@@ -570,6 +570,15 @@ Panel {
   // it and nothing more: the panel then asks which calendar, and that press
   // is what writes. Dropping is choosing the file, not agreeing to it.
   property bool dragHovering: false
+  // Between letting go of a file and the question appearing there is a beat
+  // where the drag is over and the sheet is not up yet. Without this the blur
+  // and the file lift for that beat and come back, which reads as a fault
+  // rather than as one continuous thing happening.
+  property bool stagePending: false
+  // So the bar widget can tell whether the drag is over here rather than
+  // guessing from movement it may never see.
+  readonly property alias dragInside: panelDrop.containsDrag
+  readonly property bool showingDropSurface: root.dragHovering || root.stagePending
   property var inbox: ({ name: "", events: [] })
   readonly property bool inboxWaiting: (root.inbox.events || []).length > 0
   // Remembered, and deliberately not defaulted. Everywhere else in this panel
@@ -607,19 +616,21 @@ Panel {
     return ""
   }
 
-  // The bar widget keeps the clock that decides when a drag is over, because
-  // it is the half that is always on screen. This panel only reports that the
-  // drag is still alive over here.
-  function noteHostDrag() {
-    if (root.hostWidget && typeof root.hostWidget.noteDragActivity === "function")
-      root.hostWidget.noteDragActivity()
-  }
-
   function stageFile(url) {
     var target = String(url || "")
     if (target === "" || stageProcess.running) return
+    root.stagePending = true
+    stagePendingGiveUp.restart()
     stageProcess.command = root.syncCommand.concat(["stage", target])
     stageProcess.running = true
+  }
+
+  Timer {
+    id: stagePendingGiveUp
+    // Only ever reached when staging failed outright, and the reason for that
+    // goes to the cache where the panel's own trouble line picks it up.
+    interval: 3000
+    onTriggered: root.stagePending = false
   }
 
   // The drop ends the drag, and ending a drag hands focus back to whatever you
@@ -631,29 +642,19 @@ Panel {
   // Bounded on both ends rather than a loop with hope in it: it stops the
   // moment the sheet is up, and gives up after a couple of seconds whatever
   // happened, so nothing here can fight you for the panel later on.
-  // Hung on the file arriving rather than on which way it arrived: a drop, a
-  // file opened from elsewhere and a run by hand all end here, and all three
-  // want the same thing.
-  onInboxWaitingChanged: if (root.inboxWaiting) stageArrival.restart()
-
-  Timer {
-    id: stageArrival
-    interval: 100
-    repeat: true
-    // Held for the whole window, not just until the panel first opens. The
-    // focus handed back when the drag ends can arrive after the panel is
-    // already up, and giving up the moment it opened once would lose to
-    // exactly that.
-    readonly property int window: 1500
-    property int elapsed: 0
-    onRunningChanged: if (running) elapsed = 0
-    onTriggered: {
-      elapsed += interval
-      // Answered or put away: there is nothing left to hold it open for, and
-      // continuing would be this panel refusing to be closed.
-      if (!root.inboxWaiting || elapsed >= window) { stageArrival.stop(); return }
-      if (!root.opened) root.open()
-    }
+  // A file that arrives while the panel is shut brings it up, which is what
+  // opening an .ics from a file manager needs. Nothing more than that: an
+  // earlier attempt held the panel open for a second and a half against a
+  // dismissal that turned out to be this plugin's own timer closing it, and
+  // a panel that refuses to be closed is a worse bug than the one it was
+  // written to hide.
+  onInboxWaitingChanged: {
+    if (!root.inboxWaiting) return
+    // The question is up, so the waiting is over and the blur is now the
+    // sheet's rather than the drop's. Handed over without a gap.
+    root.stagePending = false
+    stagePendingGiveUp.stop()
+    if (!root.opened) root.open()
   }
 
   function acceptInbox() {
@@ -1381,17 +1382,17 @@ Panel {
         onEntered: function(drop) {
           if (root.calendarFileIn(drop) === "") { drop.accepted = false; return }
           root.dragHovering = true
-          // Also what tells the bar widget the drag arrived, so the panel it
-          // sprang open for this is not closed out from under the pointer.
-          root.noteHostDrag()
         }
-        onPositionChanged: root.noteHostDrag()
-        // Leaving is not the end of anything. The pointer may be on its way
-        // back to the bar, or to the far side of the month. Only the quiet
-        // afterwards ends a drag, and the bar widget is what times it.
-        onExited: root.noteHostDrag()
+        onExited: root.dragHovering = false
         onDropped: function(drop) {
           root.dragHovering = false
+          // The bar widget opened this panel for the drag and holds a timer
+          // that closes it again when the drag goes quiet. The drop happened
+          // here rather than up there, so that timer has to be told: left
+          // running it counts down and closes the panel around the file that
+          // was just dropped into it.
+          if (root.hostWidget && typeof root.hostWidget.noteDrop === "function")
+            root.hostWidget.noteDrop()
           var file = root.calendarFileIn(drop)
           if (file !== "") root.stageFile(file)
         }
@@ -1408,7 +1409,7 @@ Panel {
         // somewhere to drop rather than something to read. Only while the
         // drag is there: a layer costs a texture, and paying for one to look
         // at a calendar you are not dropping anything on would be silly.
-        layer.enabled: root.dragHovering || root.inboxWaiting
+        layer.enabled: root.showingDropSurface || root.inboxWaiting
         layer.effect: MultiEffect {
           blurEnabled: true
           blur: 1.0
@@ -3553,7 +3554,7 @@ Panel {
 
       Item {
         anchors.fill: parent
-        visible: root.dragHovering
+        visible: root.showingDropSurface && !root.inboxWaiting
 
         Column {
           anchors.centerIn: parent
