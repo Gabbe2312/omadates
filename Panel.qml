@@ -622,10 +622,39 @@ Panel {
     stageProcess.running = true
   }
 
-  // The drop ends the drag, and ending a drag hands focus back to whatever
-  // you dragged from, which dismisses this panel. So the arrival of a staged
-  // file brings it back rather than leaving the answer somewhere unseen.
-  onInboxWaitingChanged: if (root.inboxWaiting && !root.opened) root.open()
+  // The drop ends the drag, and ending a drag hands focus back to whatever you
+  // dragged from, which dismisses this panel. Opening it once on the file's
+  // arrival is not enough: the two land in either order, and when the focus
+  // lands second it closes what had just opened. So after a drop the panel is
+  // held open until the question is actually on screen, and then let go of.
+  //
+  // Bounded on both ends rather than a loop with hope in it: it stops the
+  // moment the sheet is up, and gives up after a couple of seconds whatever
+  // happened, so nothing here can fight you for the panel later on.
+  // Hung on the file arriving rather than on which way it arrived: a drop, a
+  // file opened from elsewhere and a run by hand all end here, and all three
+  // want the same thing.
+  onInboxWaitingChanged: if (root.inboxWaiting) stageArrival.restart()
+
+  Timer {
+    id: stageArrival
+    interval: 100
+    repeat: true
+    // Held for the whole window, not just until the panel first opens. The
+    // focus handed back when the drag ends can arrive after the panel is
+    // already up, and giving up the moment it opened once would lose to
+    // exactly that.
+    readonly property int window: 1500
+    property int elapsed: 0
+    onRunningChanged: if (running) elapsed = 0
+    onTriggered: {
+      elapsed += interval
+      // Answered or put away: there is nothing left to hold it open for, and
+      // continuing would be this panel refusing to be closed.
+      if (!root.inboxWaiting || elapsed >= window) { stageArrival.stop(); return }
+      if (!root.opened) root.open()
+    }
+  }
 
   function acceptInbox() {
     if (root.importing || root.inboxCalendarName === "") return
