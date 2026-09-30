@@ -213,17 +213,17 @@ BarWidget {
     id: barStageProcess
   }
 
-  // The panel is deliberately not opened while a drag is in flight, and that
-  // is forced rather than chosen. Ui/KeyboardPanel.qml gives the open panel a
-  // mask covering the whole screen, bar strip included, and recovers bar
-  // clicks by forwarding them in software. Nothing forwards a drag. So an
-  // open panel takes the drag away from this widget entirely: no movement, no
-  // drop. Springing the panel open on hover cost exactly that, and the
-  // calendar opened, lost the drag, timed out, closed and caught it again in
-  // a loop.
+  // Holding a file over the bar opens the calendar so there is somewhere to
+  // drop it. Nothing closes it again while you are still holding something,
+  // and that is the point: an open panel owns the whole screen's pointer
+  // input (Ui/KeyboardPanel.qml masks the lot, bar strip included), so this
+  // widget stops seeing the drag the instant the panel appears. Any clock
+  // that tried to decide the drag was over would be deciding it blind, and
+  // did: the calendar blinked open and shut the whole way down.
   //
-  // So the bar says what it is on its own, and the panel arrives once the
-  // file has landed, which it does by itself the moment one is staged.
+  // The cost is honest. Change your mind and drop the file somewhere else and
+  // the calendar stays up until you click, because it cannot be told that the
+  // drag ended. Clicking anywhere dismisses it, as it always did.
   function noteDrop() {
     if (panelLoader.item && "dragHovering" in panelLoader.item)
       panelLoader.item.dragHovering = false
@@ -260,7 +260,10 @@ BarWidget {
       anchors.fill: parent
       anchors.margins: -Style.space(4)
       onEntered: function(drop) {
-        if (root.calendarFileIn(drop) === "") drop.accepted = false
+        if (root.calendarFileIn(drop) === "") { drop.accepted = false; return }
+        if (!root.opened) root.open()
+        if (panelLoader.item && "dragHovering" in panelLoader.item)
+          panelLoader.item.dragHovering = true
       }
       onDropped: function(drop) {
         root.noteDrop()

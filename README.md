@@ -287,6 +287,14 @@ overwrite an appointment already on the calendar. While the question is up
 nothing behind it can be pressed, and Escape or a press outside puts the file
 away without writing anything.
 
+**Opening a calendar file.** The panel can offer to become what your file
+manager opens a `.ics` with, and double-clicking one then brings it here
+rather than into a text editor. It is a press in the panel and never
+something installation does: registering for a file type writes a desktop
+entry outside this plugin's own directory and changes what the rest of your
+system does with those files. The same press turns it off again and puts back
+what was there.
+
 **Writes.** Creating and deleting events and calendars, and setting a
 calendar's colour, all go to the server. Every destructive action asks twice
 and says what it costs first. A subscribed feed is somebody else's file and

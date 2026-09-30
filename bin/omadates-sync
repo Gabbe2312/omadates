@@ -17,6 +17,7 @@ Subcommands (the panel drives all of these; they also work by hand):
     deletecalendar        Remove a calendar, or drop a feed. JSON on stdin.
     map <location>        Open a location in the system's map handler.
     open <url>            Open a link from an event in the system's handler.
+    handler <action>      install, remove or status: open .ics files with this.
     stage <file.ics>      Hold a calendar file and show the panel what is in it.
     import <calendar>     Write the held file's events into that calendar.
     discard               Drop the held file without writing anything.
@@ -946,6 +947,11 @@ def cache_state():
                       or bool(config.get("subscriptions")),
         "signedIn": bool(str(config.get("username") or "").strip()),
         "missing": missing_dependencies(),
+        # Whether this is what the desktop opens a .ics with. Read rather than
+        # remembered: the setting lives in the desktop's own database and can
+        # be changed from anywhere, so a copy kept here would go stale and
+        # offer to turn on something that is already on.
+        "opensFiles": handler_is_ours(),
     }
 
 
@@ -1136,6 +1142,113 @@ def clear_inbox():
             continue
         unlink_quietly(dir_fd, path.name)
         os.close(dir_fd)
+
+
+# ---------------------------------------------------------------- file handler
+#
+# Registering as something that opens .ics files is a change to the desktop
+# outside this plugin's own directory, so it happens on a press in the panel
+# and never on installation. Removing it puts back exactly what was there.
+
+DESKTOP_ID = KEYRING_SERVICE + ".desktop"
+CALENDAR_MIME = "text/calendar"
+
+
+def applications_dir():
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(base) / "applications"
+
+
+def desktop_entry():
+    """The entry, pointing at this very helper wherever it was installed."""
+    helper = Path(__file__).resolve()
+    return (
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=Omadates\n"
+        "Comment=Add the events in a calendar file to your calendar\n"
+        f"Exec={helper} stage %f\n"
+        "Terminal=false\n"
+        "NoDisplay=false\n"
+        f"MimeType={CALENDAR_MIME};\n"
+        "Categories=Office;Calendar;\n"
+    )
+
+
+def handler_is_ours():
+    try:
+        result = subprocess.run(["xdg-mime", "query", "default", CALENDAR_MIME],
+                                capture_output=True, text=True, timeout=5)
+    except Exception:
+        return False
+    return result.stdout.strip() == DESKTOP_ID
+
+
+def refresh_desktop_database(folder):
+    import shutil
+    if not shutil.which("update-desktop-database"):
+        return
+    try:
+        subprocess.run(["update-desktop-database", str(folder)],
+                       capture_output=True, timeout=15)
+    except Exception:
+        pass
+
+
+def touch_cache_state():
+    """Write the panel's facts out again so a change shows without a sync."""
+    try:
+        edit_cache(lambda cache: None)
+    except Exception:
+        pass
+
+
+def cmd_handler(args):
+    """Register, or stop registering, as something that opens calendar files."""
+    import shutil
+
+    action = (args[0] if args else "status").strip().lower()
+    folder = applications_dir()
+    entry = folder / DESKTOP_ID
+
+    if action == "status":
+        print(json.dumps({
+            "installed": entry.is_file(),
+            "default": handler_is_ours(),
+        }))
+        return 0
+
+    if action == "remove":
+        try:
+            entry.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            return fail(f"could not remove the file handler: {exc}")
+        refresh_desktop_database(folder)
+        touch_cache_state()
+        print("omadates-sync: no longer opens calendar files")
+        return 0
+
+    if action != "install":
+        print(f"omadates-sync: handler takes install, remove or status",
+              file=sys.stderr)
+        return 2
+
+    if not shutil.which("xdg-mime"):
+        return fail("xdg-mime is not installed")
+    folder.mkdir(parents=True, exist_ok=True)
+    entry.write_text(desktop_entry(), encoding="utf-8")
+    entry.chmod(0o644)
+    refresh_desktop_database(folder)
+    try:
+        subprocess.run(["xdg-mime", "default", DESKTOP_ID, CALENDAR_MIME],
+                       capture_output=True, timeout=10)
+    except Exception as exc:
+        return fail(f"could not become the default: {exc}")
+    touch_cache_state()
+    print("omadates-sync: calendar files now open here")
+    return 0
 
 
 def cmd_stage(args):
@@ -2173,6 +2286,8 @@ def main(argv):
         return cmd_map(rest)
     if command == "open":
         return cmd_open(rest)
+    if command == "handler":
+        return cmd_handler(rest)
     if command == "stage":
         return cmd_stage(rest)
     if command == "import":
