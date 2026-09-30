@@ -1440,10 +1440,29 @@ Panel {
         }
       }
 
+      // Shaped like the card, so the blur below can be cut to the same
+      // corners. Never drawn itself; it exists only to be sampled.
+      Item {
+        id: blurShape
+        anchors.fill: calendarScroll
+        visible: false
+        layer.enabled: true
+        Rectangle {
+          anchors.fill: parent
+          radius: Style.cornerRadius
+          color: "white"
+        }
+      }
+
       Flickable {
         id: calendarScroll
         anchors.fill: parent
-        contentWidth: calendarColumn.width
+        // Out to the card's own edge rather than stopping at the padding the
+        // panel puts around its content. The month can be soft to the corners
+        // that way instead of sitting as a square inside a rounded card, and
+        // the padding is given back to the column below so nothing moves.
+        anchors.margins: -panel.padding
+        contentWidth: calendarColumn.x + calendarColumn.width + panel.padding
         contentHeight: calendarColumn.implicitHeight
         clip: true
         boundsBehavior: Flickable.StopAtBounds
@@ -1463,15 +1482,23 @@ Panel {
           // past the corners below. The month is clipped to the card, so the
           // blur of it should be too.
           autoPaddingEnabled: false
+          maskEnabled: true
+          maskSource: blurShape
         }
         interactive: contentHeight > height || contentWidth > width
 
         Column {
           id: calendarColumn
+          // The padding the Flickable above gave up, handed back here, so the
+          // words sit exactly where they did and only the soft backdrop
+          // reaches further out.
+          x: panel.padding
+          topPadding: panel.padding
+          bottomPadding: panel.padding
           // Never narrower than the grid. The popup width is capped to what
           // the screen allows, and a fixed seven-column grid would otherwise
           // lose its last days off the edge instead of scrolling.
-          width: Math.max(calendarScroll.width, gridColumn.width)
+          width: Math.max(calendarScroll.width - panel.padding * 2, gridColumn.width)
           spacing: Style.space(8)
 
           // ---- Hero: today, centered. Once the view has stepped back
